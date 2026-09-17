@@ -3,12 +3,8 @@ package br.davi.narutoair.portal {
     import flash.events.StatusEvent;
     import flash.external.ExtensionContext;
 
-    /**
-     * Wrapper ActionScript que vive dentro do library.swf da ANE.
-     * O ExtensionContext precisa ser criado daqui, e nao do SWF principal.
-     */
     public final class PortalMarker extends EventDispatcher {
-        public static const VERSION:String = "0.4.5";
+        public static const VERSION:String = "0.4.6";
         private var context:ExtensionContext;
 
         public function PortalMarker() {
