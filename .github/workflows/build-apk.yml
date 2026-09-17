@@ -42,10 +42,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path build\classes,build\native,build\ext | Out-Null
-
           compc '-source-path=ane-as/src' '-include-classes=br.davi.narutoair.portal.PortalMarker' '-output=build/portal.swc'
           if ($LASTEXITCODE -ne 0) { throw "compc failed" }
-
           $fre = Join-Path $env:AIR_HOME 'lib\android\FlashRuntimeExtensions.jar'
           $androidJar = Join-Path $env:ANDROID_HOME 'platforms\android-35\android.jar'
           $javaFiles = Get-ChildItem -Recurse ane-java\src -Filter *.java | ForEach-Object { $_.FullName }
@@ -53,12 +51,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "javac failed" }
           jar cf build\native\portal.jar -C build\classes .
           if ($LASTEXITCODE -ne 0) { throw "jar failed" }
-
           Push-Location build\native
           jar xf ..\portal.swc library.swf
           Pop-Location
           if (!(Test-Path build\native\library.swf)) { throw "library.swf missing" }
-
           adt -package -target ane build\ext\portal.ane extension.xml -swc build\portal.swc `
             -platform Android-ARM -C build\native portal.jar library.swf `
             -platform Android-ARM64 -C build\native portal.jar library.swf
@@ -87,11 +83,9 @@ jobs:
             -storetype pkcs12 -keystore build\cert.p12 -storepass narutoair `
             build\NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk `
             NarutoAir-app.xml `
-            -platformsdk $env:ANDROID_HOME `
             -C build NarutoAir.swf `
             -extdir build\ext
           if ($LASTEXITCODE -ne 0) { throw "APK packaging failed" }
-
           $apk = 'build\NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk'
           if (!(Test-Path $apk)) { throw "APK missing" }
           Get-Item $apk | Format-List Name,Length,FullName
