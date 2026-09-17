@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>br.davi.narutoair.v04</id>
-  <versionNumber>0.4.0</versionNumber>
-  <versionLabel>0.4.0 experimental</versionLabel>
+  <versionNumber>0.4.4</versionNumber>
+  <versionLabel>0.4.4 webview bridge diagnostics</versionLabel>
   <filename>NarutoAir</filename>
-  <name>Naruto AIR Experimental 0.4</name>
+  <name>Naruto AIR Experimental 0.4.4</name>
   <description>Cliente experimental Android/AIR para o portal oficial do Naruto Online.</description>
   <supportedProfiles>mobileDevice</supportedProfiles>
   <initialWindow>
@@ -13,8 +13,8 @@
     <fullScreen>true</fullScreen>
     <autoOrients>false</autoOrients>
     <aspectRatio>landscape</aspectRatio>
-    <renderMode>direct</renderMode>
-    <depthAndStencil>true</depthAndStencil>
+    <renderMode>auto</renderMode>
+    <depthAndStencil>false</depthAndStencil>
   </initialWindow>
   <android>
     <manifestAdditions><![CDATA[
