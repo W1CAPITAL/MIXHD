@@ -4,7 +4,7 @@ package br.davi.narutoair.portal {
     import flash.external.ExtensionContext;
 
     public final class PortalMarker extends EventDispatcher {
-        public static const VERSION:String = "0.4.7";
+        public static const VERSION:String = "0.4.8";
         private var context:ExtensionContext;
 
         public function PortalMarker() {
@@ -21,6 +21,7 @@ package br.davi.narutoair.portal {
         public function hide():Object { return context.call("hide"); }
         public function show():Object { return context.call("show"); }
         public function close():Object { return context.call("close"); }
+        public function report(message:String):Object { return context.call("report", message); }
 
         public function dispose():void {
             if (!context) return;
