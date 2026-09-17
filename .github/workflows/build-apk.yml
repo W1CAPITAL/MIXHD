@@ -37,6 +37,28 @@ jobs:
           Write-Host "AIR_HOME=$env:AIR_HOME"
           Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
 
+      - name: Apply single controlled Flash repair reload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p = 'ane-java\src\br\davi\narutoair\portal\PortalContext.java'
+          $s = Get-Content $p -Raw
+          $pattern = 'setState\("flash-warning detected; adapter reinjected without reload"\);\s*injectBurst\(view\);\s*inspectSoon\(view, 150\);\s*inspectSoon\(view, 900\);'
+          $replacement = @'
+          setState("flash-warning detected; controlled reload with native UA");
+          injectBurst(view);
+          handler.postDelayed(() -> {
+              if (view == webView && !launchSent) {
+                  setState("flash-repair reload-once native-UA");
+                  view.reload();
+              }
+          }, 180);
+          '@
+          $patched = [regex]::Replace($s, $pattern, $replacement, 1)
+          if ($patched -eq $s) { throw 'Flash repair patch did not match source' }
+          Set-Content -Path $p -Value $patched -Encoding UTF8
+          Write-Host 'Applied one-time Flash repair reload while preserving native Android UA.'
+
       - name: Build ANE
         shell: pwsh
         run: |
@@ -81,12 +103,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           adt -package -target apk-captive-runtime -arch armv8 `
             -storetype pkcs12 -keystore build\cert.p12 -storepass narutoair `
-            build\NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk `
+            build\NarutoOnline_AIR_ARM64_0.5.0_NATIVE_UA_FLASH_REPAIR.apk `
             NarutoAir-app.xml `
             -C build NarutoAir.swf `
             -extdir build\ext
           if ($LASTEXITCODE -ne 0) { throw "APK packaging failed" }
-          $apk = 'build\NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk'
+          $apk = 'build\NarutoOnline_AIR_ARM64_0.5.0_NATIVE_UA_FLASH_REPAIR.apk'
           if (!(Test-Path $apk)) { throw "APK missing" }
           Get-Item $apk | Format-List Name,Length,FullName
           $entries = jar tf $apk
@@ -97,6 +119,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL
-          path: build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk
+          name: NarutoOnline_AIR_ARM64_0.5.0_NATIVE_UA_FLASH_REPAIR
+          path: build/NarutoOnline_AIR_ARM64_0.5.0_NATIVE_UA_FLASH_REPAIR.apk
           if-no-files-found: error
