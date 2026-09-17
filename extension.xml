@@ -3,6 +3,12 @@
   <id>br.davi.narutoair.portal</id>
   <versionNumber>0.4.0</versionNumber>
   <platforms>
+    <platform name="Android-ARM">
+      <applicationDeployment>
+        <nativeLibrary>portal.jar</nativeLibrary>
+        <initializer>br.davi.narutoair.portal.PortalExtension</initializer>
+      </applicationDeployment>
+    </platform>
     <platform name="Android-ARM64">
       <applicationDeployment>
         <nativeLibrary>portal.jar</nativeLibrary>
