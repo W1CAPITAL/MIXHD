@@ -14,7 +14,6 @@
     <autoOrients>false</autoOrients>
     <aspectRatio>landscape</aspectRatio>
     <renderMode>auto</renderMode>
-    <depthAndStencil>false</depthAndStencil>
   </initialWindow>
   <android>
     <manifestAdditions><![CDATA[
