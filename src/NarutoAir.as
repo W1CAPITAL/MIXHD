@@ -1,5 +1,4 @@
 package {
-    import br.davi.narutoair.portal.PortalBridge;
     import flash.display.Sprite;
     import flash.display.StageAlign;
     import flash.display.StageScaleMode;
@@ -14,9 +13,10 @@ package {
     import flash.text.TextField;
     import flash.text.TextFormat;
     import flash.utils.Timer;
+    import flash.utils.getDefinitionByName;
 
     public class NarutoAir extends Sprite {
-        private var bridge:PortalBridge;
+        private var bridge:*;
         private var loader:Loader;
         private var logField:TextField;
         private var launched:Boolean = false;
@@ -35,13 +35,18 @@ package {
             graphics.drawRect(0, 0, stage.stageWidth, stage.stageHeight);
             graphics.endFill();
             createLog();
-            log("Naruto AIR 0.4.5 - carregando ANE pelo library.swf...");
+            log("Naruto AIR 0.4.5 - carregando wrapper da ANE...");
 
             try {
-                bridge = new PortalBridge();
-                log("ANE wrapper carregado.");
+                var WrapperClass:Class = getDefinitionByName("br.davi.narutoair.portal.PortalMarker") as Class;
+                if (!WrapperClass) {
+                    log("ERRO: classe PortalMarker nao encontrada no library.swf.");
+                    return;
+                }
+                bridge = new WrapperClass();
+                log("ANE wrapper carregado pelo library.swf.");
             } catch (err:Error) {
-                log("ERRO PortalBridge #" + err.errorID + ": " + err.message);
+                log("ERRO ANE wrapper #" + err.errorID + ": " + err.message);
                 return;
             }
 
