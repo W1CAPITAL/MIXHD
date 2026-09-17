@@ -19,6 +19,8 @@ package {
     import flash.utils.getDefinitionByName;
 
     public class NarutoAir extends Sprite {
+        private static const UA:String = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/99 Safari/537.36 NarutoAIR/0.4.7";
+
         private var bridge:*;
         private var loader:Loader;
         private var logField:TextField;
@@ -145,11 +147,11 @@ package {
                 req.followRedirects = true;
                 req.manageCookies = false;
                 req.idleTimeout = 30000;
+                req.userAgent = UA;
 
                 var headers:Array = [];
                 if (cookie) headers.push(new URLRequestHeader("Cookie", cookie));
                 if (referer) headers.push(new URLRequestHeader("Referer", referer));
-                headers.push(new URLRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/99 Safari/537.36 NarutoAIR/0.4.7"));
                 headers.push(new URLRequestHeader("X-Flash-Version", "32,0,0,465"));
                 headers.push(new URLRequestHeader("Accept", "application/x-shockwave-flash,*/*;q=0.8"));
                 req.requestHeaders = headers;
@@ -159,10 +161,9 @@ package {
 
                 log("Solicitando SWF com sessao do portal...");
                 log("Cookie disponivel: " + (cookie ? "SIM (" + cookie.length + " chars)" : "NAO"));
+                log("Portal continua visivel ate o SWF realmente iniciar.");
                 swfStarted = false;
                 loader.load(req, ctx);
-
-                try { bridge.hide(); } catch (hideErr:Error) { log("ERRO hide: " + hideErr.message); }
 
                 loadTimeout = new Timer(20000, 1);
                 loadTimeout.addEventListener(TimerEvent.TIMER_COMPLETE, onLoadTimeout);
@@ -170,7 +171,7 @@ package {
             } catch (err:Error) {
                 launched = false;
                 log("ERRO sincronico ao iniciar SWF #" + err.errorID + ": " + err.message);
-                try { if (bridge) bridge.show(); } catch (showErr:Error) { }
+                showPortal();
             }
         }
 
@@ -193,13 +194,15 @@ package {
         }
 
         private function onSwfInit(e:Event):void {
-            log("SWF INIT: codigo principal iniciou.");
+            log("SWF INIT: codigo principal iniciou; trocando WebView pelo AIR.");
+            hidePortal();
             if (loader && !contains(loader)) addChildAt(loader, 0);
         }
 
         private function onLoaded(e:Event):void {
             stopLoadTimeout();
             log("SWF COMPLETE: arquivo principal carregado.");
+            hidePortal();
             if (loader && !contains(loader)) addChildAt(loader, 0);
             if (loader) {
                 try {
@@ -216,18 +219,32 @@ package {
         private function onLoadTimeout(e:TimerEvent):void {
             log("TIMEOUT: SWF nao concluiu em 20s. OPEN recebido=" + (swfStarted ? "SIM" : "NAO"));
             launched = false;
+            try { if (loader) loader.close(); } catch (closeErr:Error) { }
+            showPortal();
         }
 
         private function onLoadError(e:IOErrorEvent):void {
             stopLoadTimeout();
             launched = false;
             log("IO ERROR SWF: " + e.text);
+            showPortal();
         }
 
         private function onSecurityError(e:SecurityErrorEvent):void {
             stopLoadTimeout();
             launched = false;
             log("SECURITY ERROR SWF: " + e.text);
+            showPortal();
+        }
+
+        private function hidePortal():void {
+            try { if (bridge) bridge.hide(); }
+            catch (err:Error) { log("ERRO hide: " + err.message); }
+        }
+
+        private function showPortal():void {
+            try { if (bridge) bridge.show(); }
+            catch (err:Error) { log("ERRO show: " + err.message); }
         }
 
         private function stopLoadTimeout():void {
