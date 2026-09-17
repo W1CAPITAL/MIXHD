@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>br.davi.narutoair.v04</id>
-  <versionNumber>0.4.8</versionNumber>
-  <versionLabel>0.4.8 application domain SWF loader</versionLabel>
+  <versionNumber>0.4.9</versionNumber>
+  <versionLabel>0.4.9 clean portal fingerprint</versionLabel>
   <filename>NarutoAir</filename>
-  <name>Naruto AIR Experimental 0.4.8</name>
+  <name>Naruto AIR Experimental 0.4.9</name>
   <description>Cliente experimental Android/AIR para o portal oficial do Naruto Online.</description>
   <supportedProfiles>mobileDevice</supportedProfiles>
   <initialWindow>
