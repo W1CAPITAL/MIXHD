@@ -21,6 +21,7 @@ import com.adobe.fre.FREContext;
 import com.adobe.fre.FREFunction;
 import com.adobe.fre.FREObject;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
@@ -53,7 +54,9 @@ public class PortalContext extends FREContext {
             "s.ua=s.ua||{};s.ua.w3=true;s.ua.win=true;s.ua.mac=false;s.ua.pv=[32,0,0];" +
             "if(!s.__narutoAirPatched){s.__narutoAirPatched=true;s.__narutoAirOriginalEmbed=s.embedSWF;" +
             "s.embedSWF=function(swfUrl,replaceElemId,width,height,version,expressInstallUrl,flashvars,params,attrs,callbackFn){" +
-            "try{var abs=(new URL(String(swfUrl),location.href)).href;window.__narutoAirLaunch={swf:abs,flashvars:flashvars||{},params:params||{},page:location.href};" +
+            "try{var abs=(new URL(String(swfUrl),location.href)).href;var c={swf:abs,flashvars:flashvars||{},params:params||{},page:location.href};" +
+            "window.__narutoAirCandidates=window.__narutoAirCandidates||[];window.__narutoAirCandidates.push(c);" +
+            "if(!/empty\\.swf(?:[?#]|$)/i.test(abs))window.__narutoAirLaunch=c;" +
             "var el=document.getElementById(replaceElemId);if(el){el.setAttribute('data-narutoair-swf',abs);el.setAttribute('data-narutoair-flashvars',JSON.stringify(flashvars||{}));}" +
             "if(typeof callbackFn==='function'){try{callbackFn({success:true,id:replaceElemId,ref:el||null});}catch(cb){}}return true;}catch(z){return false;}};}return true;}catch(e){return false;}};" +
             "window.__narutoAirAdapterInstalled=true;window.__narutoAirPatch();" +
@@ -89,8 +92,14 @@ public class PortalContext extends FREContext {
         catch (Throwable ignored) { return null; }
     }
 
+    private boolean isServerLaunchRoute(String url) {
+        String u = url == null ? "" : url.toLowerCase();
+        return u.matches(".*\\/serverlist\\/s[0-9]+(?:[\\/?#].*)?$");
+    }
+
     private boolean isPortalOrLoginPage(String url) {
         String u = url == null ? "" : url.toLowerCase();
+        if (isServerLaunchRoute(u)) return false;
         return u.contains("/serverlist") || u.contains("login") || u.contains("passport") || u.contains("oauth") || u.contains("account");
     }
 
@@ -103,7 +112,12 @@ public class PortalContext extends FREContext {
         String u = url == null ? "" : url.toLowerCase();
         if (!isAllowedGameHost(u)) return false;
         if (u.contains("login") || u.contains("passport") || u.contains("oauth") || u.contains("account")) return false;
-        return u.contains("/game") || u.contains("/play") || u.contains("game?") || u.contains("serverid=") || u.contains("server_id=") || u.contains("sid=") || (u.contains("server=") && !u.contains("/serverlist"));
+        return isServerLaunchRoute(u) || u.contains("/game") || u.contains("/play") || u.contains("game?") || u.contains("serverid=") || u.contains("server_id=") || u.contains("sid=") || (u.contains("server=") && !u.contains("/serverlist"));
+    }
+
+    private boolean isPlaceholderSwf(String url) {
+        String u = url == null ? "" : url.toLowerCase();
+        return u.matches(".*(?:^|/)empty\\.swf(?:[?#].*)?$") || u.matches(".*(?:^|/)blank\\.swf(?:[?#].*)?$");
     }
 
     private String buildDesktopGameUa(String sourceUa) {
@@ -245,10 +259,13 @@ public class PortalContext extends FREContext {
                         if (desktopGameUaActive || !isPortalOrLoginPage(pageUrl)) {
                             injectFlashAdapter(view, "finished");
                             inspectSoon(view, 80);
-                            inspectSoon(view, 350);
-                            inspectSoon(view, 900);
-                            inspectSoon(view, 1800);
-                            inspectSoon(view, 3500);
+                            inspectSoon(view, 300);
+                            inspectSoon(view, 800);
+                            inspectSoon(view, 1600);
+                            inspectSoon(view, 3000);
+                            inspectSoon(view, 6000);
+                            inspectSoon(view, 10000);
+                            inspectSoon(view, 15000);
                         }
                         detectFlashWarningAndRepair(view);
                     }
@@ -258,7 +275,10 @@ public class PortalContext extends FREContext {
                     }
                     @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                         String u = request.getUrl().toString();
-                        if (!launchSent && u.toLowerCase().contains(".swf")) setState("swf-request " + u);
+                        if (!launchSent && u.toLowerCase().contains(".swf")) {
+                            if (isPlaceholderSwf(u)) setState("placeholder-swf-request ignored " + u);
+                            else setState("real-swf-request observed " + u);
+                        }
                         return super.shouldInterceptRequest(view, request);
                     }
                 });
@@ -296,10 +316,14 @@ public class PortalContext extends FREContext {
                 if (value != null && value.toLowerCase().contains("yes")) {
                     flashRepairAttempted = true;
                     activateDesktopGameUa(view, "server-side-flash-fallback");
-                    setState("flash-warning detected; adapter reinjected without reload");
+                    setState("flash-warning detected; desktop-UA reload-once");
                     injectBurst(view);
-                    inspectSoon(view, 150);
-                    inspectSoon(view, 900);
+                    handler.postDelayed(() -> {
+                        if (view == webView && !launchSent) {
+                            setState("flash-repair reload-once desktop-UA");
+                            view.reload();
+                        }
+                    }, 180);
                 }
             });
         }, 250);
@@ -309,13 +333,18 @@ public class PortalContext extends FREContext {
         handler.postDelayed(() -> {
             if (view != webView || launchSent) return;
             final String js = "(function(){try{" +
-                    "var out={page:location.href,cookie:document.cookie||'',swf:'',flashvars:{}};" +
+                    "var out={page:location.href,cookie:document.cookie||'',swf:'',flashvars:{},candidates:[]};" +
                     "function mergeObj(o){if(!o)return;for(var k in o){try{out.flashvars[String(k)]=String(o[k]);}catch(e){}}}" +
                     "function addKV(str){if(!str)return;str=String(str).replace(/^\\?/,'');str.split('&').forEach(function(p){if(!p)return;var i=p.indexOf('=');var k=i>=0?p.slice(0,i):p;var v=i>=0?p.slice(i+1):'';try{k=decodeURIComponent(k.replace(/\\+/g,' '));v=decodeURIComponent(v.replace(/\\+/g,' '));}catch(e){}if(k)out.flashvars[k]=v;});}" +
-                    "if(window.__narutoAirLaunch){try{out.swf=String(window.__narutoAirLaunch.swf||'');mergeObj(window.__narutoAirLaunch.flashvars||{});}catch(e){}}" +
-                    "var nodes=document.querySelectorAll('[data-narutoair-swf],embed,object');for(var i=0;i<nodes.length;i++){var n=nodes[i];var src=n.getAttribute('data-narutoair-swf')||n.getAttribute('src')||n.getAttribute('data')||'';if(src&&src.toLowerCase().indexOf('.swf')>=0&&!out.swf)out.swf=new URL(src,location.href).href;var fv=n.getAttribute('flashvars')||n.getAttribute('data-narutoair-flashvars');if(fv){try{var jo=JSON.parse(fv);mergeObj(jo);}catch(x){addKV(fv);}}}" +
-                    "var ps=document.querySelectorAll('param');for(var j=0;j<ps.length;j++){var p=ps[j];var name=(p.getAttribute('name')||'').toLowerCase();var val=p.getAttribute('value')||'';if((name==='movie'||name==='src')&&val.toLowerCase().indexOf('.swf')>=0&&!out.swf)out.swf=new URL(val,location.href).href;if(name==='flashvars')addKV(val);}" +
-                    "var html=document.documentElement?document.documentElement.outerHTML:'';if(!out.swf){var m=html.match(/(?:https?:)?\\/\\/[^\\\"'<> ]+\\.swf[^\\\"'<> ]*/i)||html.match(/[^\\\"'<> ]*NarutoServer\\.swf[^\\\"'<> ]*/i);if(m){try{out.swf=new URL(m[0],location.href).href;}catch(e){out.swf=m[0];}}}" +
+                    "function bad(u){return /(?:^|\\/)empty\\.swf(?:[?#]|$)/i.test(u)||/(?:^|\\/)blank\\.swf(?:[?#]|$)/i.test(u);}" +
+                    "function consider(u,fv){if(!u)return;try{u=(new URL(String(u),location.href)).href;}catch(e){u=String(u);}if(u.toLowerCase().indexOf('.swf')<0)return;if(out.candidates.indexOf(u)<0)out.candidates.push(u);if(bad(u))return;if(!out.swf||/NarutoServer\\.swf/i.test(u)){out.swf=u;if(fv)mergeObj(fv);}}" +
+                    "if(window.__narutoAirLaunch){try{consider(window.__narutoAirLaunch.swf,window.__narutoAirLaunch.flashvars||{});}catch(e){}}" +
+                    "if(window.__narutoAirCandidates){try{for(var ci=0;ci<window.__narutoAirCandidates.length;ci++){var cc=window.__narutoAirCandidates[ci];consider(cc&&cc.swf,cc&&cc.flashvars);}}catch(e){}}" +
+                    "var nodes=document.querySelectorAll('[data-narutoair-swf],embed,object');for(var i=0;i<nodes.length;i++){var n=nodes[i];var src=n.getAttribute('data-narutoair-swf')||n.getAttribute('src')||n.getAttribute('data')||'';var fv=n.getAttribute('flashvars')||n.getAttribute('data-narutoair-flashvars');var fvo={};if(fv){try{fvo=JSON.parse(fv);}catch(x){addKV(fv);}}consider(src,fvo);}" +
+                    "var ps=document.querySelectorAll('param');for(var j=0;j<ps.length;j++){var p=ps[j];var name=(p.getAttribute('name')||'').toLowerCase();var val=p.getAttribute('value')||'';if(name==='movie'||name==='src')consider(val,null);if(name==='flashvars')addKV(val);}" +
+                    "try{var rs=performance&&performance.getEntriesByType?performance.getEntriesByType('resource'):[];for(var r=0;r<rs.length;r++)consider(rs[r].name,null);}catch(e){}" +
+                    "try{for(var wk in window){if(!/(swf|flash|game|server)/i.test(wk))continue;try{var wv=window[wk];if(typeof wv==='string'&&wv.toLowerCase().indexOf('.swf')>=0)consider(wv,null);}catch(x){}}}catch(e){}" +
+                    "var html=document.documentElement?document.documentElement.outerHTML:'';html=html.replace(/\\\\\\//g,'/');var re=/((?:https?:)?\\/\\/[^\\\"'<> ]+\\.swf[^\\\"'<> ]*|(?:[A-Za-z0-9_\\-.]+\\/)+(?:[A-Za-z0-9_\\-.]+\\.swf)(?:\\?[^\\\"'<> ]*)?)/ig;var m,c=0;while((m=re.exec(html))&&c++<100)consider(m[1],null);" +
                     "var q=(out.swf||'').split('?')[1];if(q)addKV(q);" +
                     "return JSON.stringify(out);}catch(e){return JSON.stringify({error:String(e),page:location.href});}})();";
             view.evaluateJavascript(js, value -> {
@@ -325,19 +354,25 @@ public class PortalContext extends FREContext {
                     String json = parsed instanceof String ? (String) parsed : value;
                     JSONObject payload = new JSONObject(json);
                     String swf = payload.optString("swf", "");
-                    if (!swf.isEmpty() && swf.toLowerCase().contains(".swf")) {
-                        String page = payload.optString("page", "");
-                        String nativeCookie = null;
-                        try { nativeCookie = CookieManager.getInstance().getCookie(swf); } catch (Throwable ignored) { }
-                        if ((nativeCookie == null || nativeCookie.isEmpty()) && !page.isEmpty()) {
-                            try { nativeCookie = CookieManager.getInstance().getCookie(page); } catch (Throwable ignored) { }
-                        }
-                        if (nativeCookie != null && !nativeCookie.isEmpty()) payload.put("cookie", nativeCookie);
-                        payload.put("userAgent", activeUserAgent == null ? "" : activeUserAgent);
-                        launchSent = true;
-                        setState("launch-captured " + swf);
-                        send("launch", payload.toString());
+                    JSONArray candidates = payload.optJSONArray("candidates");
+                    int candidateCount = candidates == null ? 0 : candidates.length();
+
+                    if (swf.isEmpty() || isPlaceholderSwf(swf)) {
+                        if (candidateCount > 0) setState("SWF hunt: placeholder(s) ignored; candidates=" + candidateCount + "; waiting real game SWF");
+                        return;
                     }
+
+                    String page = payload.optString("page", "");
+                    String nativeCookie = null;
+                    try { nativeCookie = CookieManager.getInstance().getCookie(swf); } catch (Throwable ignored) { }
+                    if ((nativeCookie == null || nativeCookie.isEmpty()) && !page.isEmpty()) {
+                        try { nativeCookie = CookieManager.getInstance().getCookie(page); } catch (Throwable ignored) { }
+                    }
+                    if (nativeCookie != null && !nativeCookie.isEmpty()) payload.put("cookie", nativeCookie);
+                    payload.put("userAgent", activeUserAgent == null ? "" : activeUserAgent);
+                    launchSent = true;
+                    setState("REAL launch-captured " + swf + " candidates=" + candidateCount);
+                    send("launch", payload.toString());
                 } catch (Throwable t) { setState("ERROR capture " + t.getMessage()); }
             });
         }, delayMs);
