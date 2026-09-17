@@ -53,3 +53,5 @@ $m=$m.Replace('public static const VERSION:String = "0.5.9";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.6.0 patch applied: window.open and target blank forced into active WebView.'
+
+. .\scripts\patch-061.ps1
