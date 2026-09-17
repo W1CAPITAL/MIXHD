@@ -193,3 +193,5 @@ $m=$m.Replace('public static const VERSION:String = "0.5.7";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.5.8 patch applied: host-scoped legacy TLS -> HTTP bridge for naruto-pt.oasgames.com.'
+
+. .\scripts\patch-059.ps1
