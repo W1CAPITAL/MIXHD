@@ -1,4 +1,5 @@
 package {
+    import br.davi.narutoair.portal.PortalBridge;
     import flash.display.Sprite;
     import flash.display.StageAlign;
     import flash.display.StageScaleMode;
@@ -7,7 +8,6 @@ package {
     import flash.events.SecurityErrorEvent;
     import flash.events.StatusEvent;
     import flash.events.TimerEvent;
-    import flash.external.ExtensionContext;
     import flash.net.URLRequest;
     import flash.display.Loader;
     import flash.system.LoaderContext;
@@ -16,7 +16,7 @@ package {
     import flash.utils.Timer;
 
     public class NarutoAir extends Sprite {
-        private var ext:ExtensionContext;
+        private var bridge:PortalBridge;
         private var loader:Loader;
         private var logField:TextField;
         private var launched:Boolean = false;
@@ -35,31 +35,27 @@ package {
             graphics.drawRect(0, 0, stage.stageWidth, stage.stageHeight);
             graphics.endFill();
             createLog();
-            log("Naruto AIR 0.4.4 - iniciando ponte Android...");
+            log("Naruto AIR 0.4.5 - carregando ANE pelo library.swf...");
 
             try {
-                ext = ExtensionContext.createExtensionContext("br.davi.narutoair.portal", null);
+                bridge = new PortalBridge();
+                log("ANE wrapper carregado.");
             } catch (err:Error) {
-                log("ERRO createExtensionContext #" + err.errorID + ": " + err.message);
+                log("ERRO PortalBridge #" + err.errorID + ": " + err.message);
                 return;
             }
 
-            if (!ext) {
-                log("ERRO: ExtensionContext retornou null.");
-                return;
-            }
-
-            ext.addEventListener(StatusEvent.STATUS, onNativeStatus);
+            bridge.addEventListener(StatusEvent.STATUS, onNativeStatus);
 
             try {
-                var pingResult:Object = ext.call("ping");
+                var pingResult:Object = bridge.ping();
                 log("PING ANE: " + String(pingResult));
             } catch (pingErr:Error) {
                 log("ERRO ping #" + pingErr.errorID + ": " + pingErr.message);
             }
 
             try {
-                var openResult:Object = ext.call("open", "https://naruto.narutowebgame.com/pt/serverlist");
+                var openResult:Object = bridge.openPortal("https://naruto.narutowebgame.com/pt/serverlist/");
                 log("OPEN ANE: " + String(openResult));
             } catch (openErr:Error) {
                 log("ERRO open #" + openErr.errorID + ": " + openErr.message);
@@ -89,9 +85,9 @@ package {
         }
 
         private function pollNativeStatus(e:TimerEvent):void {
-            if (!ext) return;
+            if (!bridge) return;
             try {
-                var value:Object = ext.call("status");
+                var value:Object = bridge.status();
                 var s:String = value == null ? "null" : String(value);
                 if (s != lastNativeStatus) {
                     lastNativeStatus = s;
@@ -118,7 +114,7 @@ package {
                     }
                     launched = true;
                     log("SWF capturado: " + swf);
-                    ext.call("hide");
+                    bridge.hide();
                     launchSwf(swf, info.flashvars || {});
                 } catch (err:Error) {
                     log("Falha ao interpretar dados do portal: " + err.message);
@@ -151,13 +147,13 @@ package {
         private function onLoadError(e:IOErrorEvent):void {
             launched = false;
             log("Erro de rede ao carregar SWF: " + e.text);
-            try { ext.call("show"); } catch (err:Error) { log("ERRO show: " + err.message); }
+            try { if (bridge) bridge.show(); } catch (err:Error) { log("ERRO show: " + err.message); }
         }
 
         private function onSecurityError(e:SecurityErrorEvent):void {
             launched = false;
             log("Erro de seguranca do SWF: " + e.text);
-            try { ext.call("show"); } catch (err:Error) { log("ERRO show: " + err.message); }
+            try { if (bridge) bridge.show(); } catch (err:Error) { log("ERRO show: " + err.message); }
         }
 
         private function countKeys(o:Object):int {
