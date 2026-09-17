@@ -8,6 +8,7 @@ import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -26,7 +27,9 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 public class PortalContext extends FREContext {
     private WebView webView;
@@ -37,6 +40,7 @@ public class PortalContext extends FREContext {
     private volatile String state = "native-context-ready";
     private volatile String nativeUserAgent = "";
     private volatile String activeUserAgent = "";
+    private volatile String currentGamePage = "";
 
     private static final String FLASH_ADAPTER_JS =
             "(function(){try{" +
@@ -58,7 +62,10 @@ public class PortalContext extends FREContext {
             "window.__narutoAirCandidates=window.__narutoAirCandidates||[];window.__narutoAirCandidates.push(c);" +
             "if(!/empty\\.swf(?:[?#]|$)/i.test(abs))window.__narutoAirLaunch=c;" +
             "var el=document.getElementById(replaceElemId);if(el){el.setAttribute('data-narutoair-swf',abs);el.setAttribute('data-narutoair-flashvars',JSON.stringify(flashvars||{}));}" +
-            "if(typeof callbackFn==='function'){try{callbackFn({success:true,id:replaceElemId,ref:el||null});}catch(cb){}}return true;}catch(z){return false;}};}return true;}catch(e){return false;}};" +
+            "if(!/empty\\.swf(?:[?#]|$)/i.test(abs)&&window.NarutoAirNative&&window.NarutoAirNative.capture){try{window.NarutoAirNative.capture(JSON.stringify(c));}catch(nb){}}" +
+            "var ref=el||{};try{ref.PercentLoaded=function(){return 100;};ref.GetVariable=function(v){return String(v)==='$version'?'WIN 32,0,0,465':'';};ref.SetVariable=function(){return '';};ref.CallFunction=function(){return '';};}catch(re){}" +
+            "if(typeof callbackFn==='function'){try{callbackFn({success:true,id:replaceElemId,ref:ref});}catch(cb){}}return true;}catch(z){return false;}};}return true;}catch(e){return false;}};" +
+            "try{var __naValue=window.swfobject;Object.defineProperty(window,'swfobject',{configurable:true,get:function(){return __naValue;},set:function(v){__naValue=v;try{window.__narutoAirPatch();}catch(se){}}});}catch(se2){}" +
             "window.__narutoAirAdapterInstalled=true;window.__narutoAirPatch();" +
             "window.setInterval(function(){try{window.__narutoAirPatch();}catch(e){}},75);" +
             "return 'installed';}catch(e){return 'ERR:'+String(e);}})();";
@@ -179,16 +186,12 @@ public class PortalContext extends FREContext {
 
     private boolean handleNavigation(final WebView view, String target) {
         if (view == null || target == null || target.isEmpty()) return false;
-        if (!desktopGameUaActive && isLikelyGameUrl(target)) {
-            activateDesktopGameUa(view, "game-navigation");
-            injectBurst(view);
-            view.loadUrl(target);
-            return true;
-        }
-        if (desktopGameUaActive && isPortalOrLoginPage(target) && !isLikelyGameUrl(target)) {
-            restoreNativeUa(view, "portal-navigation");
-            view.loadUrl(target);
-            return true;
+        if (isLikelyGameUrl(target)) {
+            currentGamePage = target;
+            activeUserAgent = nativeUserAgent;
+            desktopGameUaActive = false;
+            setState("game-navigation native-UA document-start bridge " + target);
+            return false;
         }
         return false;
     }
@@ -237,6 +240,9 @@ public class PortalContext extends FREContext {
                 cm.setAcceptCookie(true);
                 cm.setAcceptThirdPartyCookies(webView, true);
 
+                webView.addJavascriptInterface(new PortalJsBridge(), "NarutoAirNative");
+                installDocumentStartAdapter(webView);
+
                 webView.setWebChromeClient(new WebChromeClient());
                 webView.setWebViewClient(new WebViewClient() {
                     @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -250,13 +256,14 @@ public class PortalContext extends FREContext {
                     @Override public void onPageStarted(WebView view, String pageUrl, Bitmap favicon) {
                         super.onPageStarted(view, pageUrl, favicon);
                         setState("page-started " + pageUrl);
-                        if (desktopGameUaActive || !isPortalOrLoginPage(pageUrl)) injectBurst(view);
+                        if (isLikelyGameUrl(pageUrl)) currentGamePage = pageUrl;
+                        if (!isPortalOrLoginPage(pageUrl)) injectBurst(view);
                     }
                     @Override public void onPageFinished(WebView view, String pageUrl) {
                         super.onPageFinished(view, pageUrl);
                         setState("page-finished " + pageUrl);
                         detectCloudflareBlock(view);
-                        if (desktopGameUaActive || !isPortalOrLoginPage(pageUrl)) {
+                        if (!isPortalOrLoginPage(pageUrl)) {
                             injectFlashAdapter(view, "finished");
                             inspectSoon(view, 80);
                             inspectSoon(view, 300);
@@ -275,12 +282,17 @@ public class PortalContext extends FREContext {
                     }
                     @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                         String u = request.getUrl().toString();
-                        if (!launchSent && u.toLowerCase().contains(".swf")) {
-                            if (isPlaceholderSwf(u)) setState("placeholder-swf-request ignored " + u);
-                            else setState("real-swf-request observed " + u);
+                        String low = u.toLowerCase();
+                        if (!launchSent && low.contains(".swf")) {
+                            if (isPlaceholderSwf(u)) {
+                                setState("placeholder-swf-request ignored " + u);
+                            } else {
+                                setState("real-swf-request observed " + u);
+                                captureNetworkSwf(u, request);
+                            }
                         }
                         return super.shouldInterceptRequest(view, request);
-                    }
+                    }}
                 });
 
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
@@ -293,6 +305,83 @@ public class PortalContext extends FREContext {
                 setState("loadUrl-called " + url);
             } catch (Throwable t) {
                 setState("ERROR create-webview " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            }
+        });
+    }
+
+    private void installDocumentStartAdapter(final WebView view) {
+        try {
+            Class<?> featureClass = Class.forName("androidx.webkit.WebViewFeature");
+            String feature = String.valueOf(featureClass.getField("DOCUMENT_START_SCRIPT").get(null));
+            Object supported = featureClass.getMethod("isFeatureSupported", String.class).invoke(null, feature);
+            if (!(supported instanceof Boolean) || !((Boolean) supported)) {
+                setState("document-start-script unsupported; evaluateJavascript fallback active");
+                return;
+            }
+            Set<String> origins = new HashSet<>();
+            origins.add("https://naruto.narutowebgame.com");
+            origins.add("https://*.narutowebgame.com");
+            origins.add("https://*.oasgames.com");
+            Class<?> compatClass = Class.forName("androidx.webkit.WebViewCompat");
+            compatClass.getMethod("addDocumentStartJavaScript", WebView.class, String.class, Set.class)
+                    .invoke(null, view, FLASH_ADAPTER_JS, origins);
+            setState("document-start Flash adapter installed");
+        } catch (Throwable t) {
+            setState("document-start adapter unavailable: " + t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()));
+        }
+    }
+
+    private void sendLaunchPayload(final JSONObject payload, final String source) {
+        if (payload == null || launchSent) return;
+        try {
+            String swf = payload.optString("swf", "");
+            if (swf.isEmpty() || isPlaceholderSwf(swf) || !isAllowedGameHost(swf)) return;
+            String page = payload.optString("page", "");
+            if (page.isEmpty()) page = currentGamePage == null ? "" : currentGamePage;
+            payload.put("page", page);
+            if (!payload.has("flashvars") || !(payload.opt("flashvars") instanceof JSONObject)) {
+                payload.put("flashvars", new JSONObject());
+            }
+            String cookie = null;
+            try { cookie = CookieManager.getInstance().getCookie(swf); } catch (Throwable ignored) { }
+            if ((cookie == null || cookie.isEmpty()) && !page.isEmpty()) {
+                try { cookie = CookieManager.getInstance().getCookie(page); } catch (Throwable ignored) { }
+            }
+            if (cookie != null && !cookie.isEmpty()) payload.put("cookie", cookie);
+            payload.put("userAgent", nativeUserAgent == null ? "" : nativeUserAgent);
+            payload.put("source", source == null ? "" : source);
+            launchSent = true;
+            setState("REAL " + source + " launch-captured " + swf);
+            send("launch", payload.toString());
+        } catch (Throwable t) {
+            setState("ERROR launch payload " + t.getMessage());
+        }
+    }
+
+    private void captureNetworkSwf(final String swfUrl, final WebResourceRequest request) {
+        handler.post(() -> {
+            if (launchSent || swfUrl == null || swfUrl.isEmpty() || isPlaceholderSwf(swfUrl)) return;
+            try {
+                JSONObject payload = new JSONObject();
+                payload.put("swf", swfUrl);
+                payload.put("flashvars", new JSONObject());
+                String referer = "";
+                try {
+                    Map<String, String> h = request == null ? null : request.getRequestHeaders();
+                    if (h != null) {
+                        for (Map.Entry<String, String> e : h.entrySet()) {
+                            if (e.getKey() != null && "referer".equalsIgnoreCase(e.getKey())) {
+                                referer = e.getValue() == null ? "" : e.getValue();
+                                break;
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) { }
+                if (referer.isEmpty()) referer = currentGamePage == null ? "" : currentGamePage;
+                payload.put("page", referer);
+                sendLaunchPayload(payload, "network");
+            } catch (Throwable t) {
+                setState("ERROR network SWF capture " + t.getMessage());
             }
         });
     }
@@ -315,15 +404,11 @@ public class PortalContext extends FREContext {
             view.evaluateJavascript(js, value -> {
                 if (value != null && value.toLowerCase().contains("yes")) {
                     flashRepairAttempted = true;
-                    activateDesktopGameUa(view, "server-side-flash-fallback");
-                    setState("flash-warning detected; desktop-UA reload-once");
+                    setState("flash-warning detected; native-UA preserved; refreshing document-start adapter");
                     injectBurst(view);
-                    handler.postDelayed(() -> {
-                        if (view == webView && !launchSent) {
-                            setState("flash-repair reload-once desktop-UA");
-                            view.reload();
-                        }
-                    }, 180);
+                    inspectSoon(view, 150);
+                    inspectSoon(view, 700);
+                    inspectSoon(view, 1600);
                 }
             });
         }, 250);
@@ -408,6 +493,21 @@ public class PortalContext extends FREContext {
         Activity a = getActivity();
         if (a == null) return;
         a.runOnUiThread(this::removeWebViewNow);
+    }
+
+    private class PortalJsBridge {
+        @JavascriptInterface
+        public void capture(final String json) {
+            handler.post(() -> {
+                if (launchSent || json == null || json.isEmpty()) return;
+                try {
+                    JSONObject payload = new JSONObject(json);
+                    sendLaunchPayload(payload, "document-start-js");
+                } catch (Throwable t) {
+                    setState("ERROR JS bridge capture " + t.getMessage());
+                }
+            });
+        }
     }
 
     private class PingFunction implements FREFunction {
