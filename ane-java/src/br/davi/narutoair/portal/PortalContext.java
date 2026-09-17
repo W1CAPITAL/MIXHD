@@ -6,7 +6,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -31,9 +30,12 @@ public class PortalContext extends FREContext {
     private WebView webView;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean launchSent = false;
+    private volatile String state = "native-context-ready";
 
     @Override public Map<String, FREFunction> getFunctions() {
         Map<String, FREFunction> map = new HashMap<>();
+        map.put("ping", new PingFunction());
+        map.put("status", new StatusFunction());
         map.put("open", new OpenFunction());
         map.put("hide", new HideFunction());
         map.put("show", new ShowFunction());
@@ -45,22 +47,34 @@ public class PortalContext extends FREContext {
         destroyWebView();
     }
 
+    private void setState(String s) {
+        state = s == null ? "" : s;
+        send("log", state);
+    }
+
     private void send(String code, String level) {
         try { dispatchStatusEventAsync(code, level == null ? "" : level); }
         catch (Throwable ignored) { }
     }
 
+    private FREObject stringObject(String value) {
+        try { return FREObject.newObject(value == null ? "" : value); }
+        catch (Throwable ignored) { return null; }
+    }
+
     private void createAndOpen(final String url) {
         final Activity activity = getActivity();
         if (activity == null) {
-            send("log", "ERRO: Activity Android indisponivel.");
+            setState("ERROR activity-null");
             return;
         }
 
+        setState("open-scheduled activity=" + activity.getClass().getName());
         activity.runOnUiThread(() -> {
             try {
                 removeWebViewNow();
                 launchSent = false;
+                setState("ui-thread creating-webview");
 
                 webView = new WebView(activity);
                 webView.setBackgroundColor(Color.WHITE);
@@ -69,7 +83,8 @@ public class PortalContext extends FREContext {
                 webView.setFocusableInTouchMode(true);
                 webView.setClickable(true);
                 webView.requestFocus(View.FOCUS_DOWN);
-                if (android.os.Build.VERSION.SDK_INT >= 21) webView.setElevation(1000f);
+                webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                if (android.os.Build.VERSION.SDK_INT >= 21) webView.setElevation(10000f);
 
                 WebSettings s = webView.getSettings();
                 s.setJavaScriptEnabled(true);
@@ -84,7 +99,7 @@ public class PortalContext extends FREContext {
                 s.setDisplayZoomControls(false);
                 s.setJavaScriptCanOpenWindowsAutomatically(true);
                 s.setSupportMultipleWindows(false);
-                s.setUserAgentString(s.getUserAgentString() + " NarutoAIR/0.4.3");
+                s.setUserAgentString(s.getUserAgentString() + " NarutoAIR/0.4.4");
 
                 CookieManager cm = CookieManager.getInstance();
                 cm.setAcceptCookie(true);
@@ -94,7 +109,7 @@ public class PortalContext extends FREContext {
                 webView.setWebViewClient(new WebViewClient() {
                     @Override public void onPageFinished(WebView view, String pageUrl) {
                         super.onPageFinished(view, pageUrl);
-                        send("log", "Pagina carregada: " + pageUrl);
+                        setState("page-finished " + pageUrl);
                         inspectSoon(view, 250);
                         inspectSoon(view, 1200);
                         inspectSoon(view, 3000);
@@ -103,40 +118,34 @@ public class PortalContext extends FREContext {
                     @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                         super.onReceivedError(view, request, error);
                         if (request != null && request.isForMainFrame()) {
-                            send("log", "ERRO WebView: " + error);
+                            setState("ERROR webview " + String.valueOf(error));
                         }
                     }
 
                     @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                         String u = request.getUrl().toString();
                         if (!launchSent && u.toLowerCase().contains(".swf")) {
-                            send("log", "Requisicao SWF detectada: " + u);
+                            setState("swf-request " + u);
                         }
                         return super.shouldInterceptRequest(view, request);
                     }
                 });
 
-                Window window = activity.getWindow();
-                View decor = window != null ? window.getDecorView() : null;
-                if (!(decor instanceof ViewGroup)) {
-                    throw new IllegalStateException("decorView nao e ViewGroup");
-                }
-
-                ViewGroup root = (ViewGroup) decor;
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                 );
-                root.addView(webView, lp);
+                activity.addContentView(webView, lp);
                 webView.bringToFront();
-                root.invalidate();
+                webView.requestLayout();
                 webView.invalidate();
 
-                send("log", "WebView anexada ao decorView: " + root.getClass().getName());
-                send("log", "Abrindo portal: " + url);
+                setState("webview-attached " + webView.getWidth() + "x" + webView.getHeight());
+                webView.post(() -> setState("webview-laid-out " + webView.getWidth() + "x" + webView.getHeight()));
                 webView.loadUrl(url);
+                setState("loadUrl-called " + url);
             } catch (Throwable t) {
-                send("log", "ERRO ao criar WebView: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                setState("ERROR create-webview " + t.getClass().getSimpleName() + ": " + t.getMessage());
             }
         });
     }
@@ -161,11 +170,11 @@ public class PortalContext extends FREContext {
                     String swf = payload.optString("swf", "");
                     if (!swf.isEmpty() && swf.toLowerCase().contains(".swf")) {
                         launchSent = true;
-                        send("log", "SWF e parametros de lancamento capturados.");
+                        setState("launch-captured " + swf);
                         send("launch", json);
                     }
                 } catch (Throwable t) {
-                    send("log", "Falha ao interpretar captura: " + t.getMessage());
+                    setState("ERROR capture " + t.getMessage());
                 }
             });
         }, delayMs);
@@ -173,11 +182,12 @@ public class PortalContext extends FREContext {
 
     private void setVisible(final boolean visible) {
         Activity a = getActivity();
-        if (a == null) return;
+        if (a == null) { setState("ERROR show-hide activity-null"); return; }
         a.runOnUiThread(() -> {
             if (webView != null) {
                 webView.setVisibility(visible ? View.VISIBLE : View.GONE);
                 if (visible) webView.bringToFront();
+                setState(visible ? "webview-visible" : "webview-hidden");
             }
         });
     }
@@ -202,17 +212,30 @@ public class PortalContext extends FREContext {
         a.runOnUiThread(this::removeWebViewNow);
     }
 
+    private class PingFunction implements FREFunction {
+        @Override public FREObject call(FREContext c, FREObject[] a) {
+            Activity activity = getActivity();
+            return stringObject("native-ok activity=" + (activity == null ? "null" : activity.getClass().getName()));
+        }
+    }
+
+    private class StatusFunction implements FREFunction {
+        @Override public FREObject call(FREContext c, FREObject[] a) {
+            return stringObject(state);
+        }
+    }
+
     private class OpenFunction implements FREFunction {
         @Override public FREObject call(FREContext context, FREObject[] args) {
             String url = "https://naruto.narutowebgame.com/pt/serverlist";
             try { if (args != null && args.length > 0 && args[0] != null) url = args[0].getAsString(); }
             catch (Throwable ignored) { }
-            send("log", "Comando open recebido pela extensao nativa.");
             createAndOpen(url);
-            return null;
+            return stringObject("open-accepted");
         }
     }
-    private class HideFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(false); return null; } }
-    private class ShowFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(true); return null; } }
-    private class CloseFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { destroyWebView(); return null; } }
+
+    private class HideFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(false); return stringObject("hide-accepted"); } }
+    private class ShowFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(true); return stringObject("show-accepted"); } }
+    private class CloseFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { destroyWebView(); return stringObject("close-accepted"); } }
 }
