@@ -60,6 +60,7 @@ jobs:
 
           adt -package -target ane build/ext/portal.ane extension.xml \
             -swc build/portal.swc \
+            -platform Android-ARM -C build/native portal.jar library.swf \
             -platform Android-ARM64 -C build/native portal.jar library.swf
           unzip -l build/ext/portal.ane
 
@@ -84,6 +85,7 @@ jobs:
           set -euxo pipefail
           adt -package \
             -target apk-captive-runtime \
+            -arch armv8 \
             -storetype pkcs12 \
             -keystore build/cert.p12 \
             -storepass narutoair \
@@ -92,6 +94,7 @@ jobs:
             -C build NarutoAir.swf \
             -extdir build/ext
           ls -lh build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk
+          unzip -l build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk | grep 'lib/arm64-v8a' | head -20
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
