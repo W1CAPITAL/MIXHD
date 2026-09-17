@@ -1,6 +1,4 @@
 $ErrorActionPreference = 'Stop'
-. .\scripts\patch-058.ps1
-
 $p='ane-java\src\br\davi\narutoair\portal\PortalContext.java'
 $s=Get-Content $p -Raw
 
