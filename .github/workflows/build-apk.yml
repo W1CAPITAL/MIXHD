@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p build/classes build/native build/ext
-          compc -load-config+="$AIR_HOME/frameworks/air-config.xml" \
+          compc \
             -source-path=ane-as/src \
             -include-classes=br.davi.narutoair.portal.PortalMarker \
             -output=build/portal.swc
@@ -65,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          mxmlc -load-config+="$AIR_HOME/frameworks/air-config.xml" \
+          mxmlc \
             -source-path=src \
             -output=build/NarutoAir.swf \
             src/NarutoAir.as
