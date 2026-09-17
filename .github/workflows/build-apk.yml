@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: windows-latest
     timeout-minutes: 25
     steps:
       - name: Checkout
@@ -28,82 +28,77 @@ jobs:
           air-version: '51.3.4.3'
           accept-license: true
 
-      - name: Use Android SDK packaging tools
-        shell: bash
+      - name: Verify Android SDK
+        shell: pwsh
         run: |
-          set -euxo pipefail
-          test -f "$ANDROID_HOME/platforms/android-35/android.jar"
-          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-          echo "Using Android build-tools: $BT"
-          test -x "$BT/aapt"
-          test -x "$BT/aapt2"
-          rm -f "$AIR_HOME/lib/android/bin/aapt" "$AIR_HOME/lib/android/bin/aapt2"
-          ln -s "$BT/aapt" "$AIR_HOME/lib/android/bin/aapt"
-          ln -s "$BT/aapt2" "$AIR_HOME/lib/android/bin/aapt2"
-          "$AIR_HOME/lib/android/bin/aapt" version
-          "$AIR_HOME/lib/android/bin/aapt2" version
+          $ErrorActionPreference = 'Stop'
+          $androidJar = Join-Path $env:ANDROID_HOME 'platforms\android-35\android.jar'
+          if (!(Test-Path $androidJar)) { throw "android-35/android.jar not found" }
+          Write-Host "AIR_HOME=$env:AIR_HOME"
+          Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
 
       - name: Build ANE
-        shell: bash
+        shell: pwsh
         run: |
-          set -euxo pipefail
-          mkdir -p build/classes build/native build/ext
-          compc \
-            -source-path=ane-as/src \
-            -include-classes=br.davi.narutoair.portal.PortalMarker \
-            -output=build/portal.swc
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path build\classes,build\native,build\ext | Out-Null
 
-          FRE_JAR="$AIR_HOME/lib/android/FlashRuntimeExtensions.jar"
-          test -f "$FRE_JAR"
-          javac -source 8 -target 8 \
-            -cp "$FRE_JAR:$ANDROID_HOME/platforms/android-35/android.jar" \
-            -d build/classes \
-            $(find ane-java/src -name '*.java')
-          jar cf build/native/portal.jar -C build/classes .
-          unzip -p build/portal.swc library.swf > build/native/library.swf
-          test -s build/native/library.swf
+          compc '-source-path=ane-as/src' '-include-classes=br.davi.narutoair.portal.PortalMarker' '-output=build/portal.swc'
+          if ($LASTEXITCODE -ne 0) { throw "compc failed" }
 
-          adt -package -target ane build/ext/portal.ane extension.xml \
-            -swc build/portal.swc \
-            -platform Android-ARM -C build/native portal.jar library.swf \
-            -platform Android-ARM64 -C build/native portal.jar library.swf
-          unzip -l build/ext/portal.ane
+          $fre = Join-Path $env:AIR_HOME 'lib\android\FlashRuntimeExtensions.jar'
+          $androidJar = Join-Path $env:ANDROID_HOME 'platforms\android-35\android.jar'
+          $javaFiles = Get-ChildItem -Recurse ane-java\src -Filter *.java | ForEach-Object { $_.FullName }
+          javac -source 8 -target 8 -cp "$fre;$androidJar" -d build\classes $javaFiles
+          if ($LASTEXITCODE -ne 0) { throw "javac failed" }
+          jar cf build\native\portal.jar -C build\classes .
+          if ($LASTEXITCODE -ne 0) { throw "jar failed" }
+
+          Push-Location build\native
+          jar xf ..\portal.swc library.swf
+          Pop-Location
+          if (!(Test-Path build\native\library.swf)) { throw "library.swf missing" }
+
+          adt -package -target ane build\ext\portal.ane extension.xml -swc build\portal.swc `
+            -platform Android-ARM -C build\native portal.jar library.swf `
+            -platform Android-ARM64 -C build\native portal.jar library.swf
+          if ($LASTEXITCODE -ne 0) { throw "ANE packaging failed" }
+          jar tf build\ext\portal.ane
 
       - name: Compile AIR application
-        shell: bash
+        shell: pwsh
         run: |
-          set -euxo pipefail
-          mxmlc \
-            -source-path=src \
-            -output=build/NarutoAir.swf \
-            src/NarutoAir.as
+          $ErrorActionPreference = 'Stop'
+          mxmlc '-source-path=src' '-output=build/NarutoAir.swf' src/NarutoAir.as
+          if ($LASTEXITCODE -ne 0) { throw "mxmlc failed" }
 
       - name: Create signing certificate
-        shell: bash
+        shell: pwsh
         run: |
-          set -euxo pipefail
-          adt -certificate -cn 'Naruto AIR Experimental' 2048-RSA build/cert.p12 narutoair
+          $ErrorActionPreference = 'Stop'
+          adt -certificate -cn 'Naruto AIR Experimental' 2048-RSA build\cert.p12 narutoair
+          if ($LASTEXITCODE -ne 0) { throw "certificate creation failed" }
 
       - name: Package captive ARM64 APK
-        shell: bash
-        env:
-          AIR_ANDROID_SDK_HOME: ${{ env.ANDROID_HOME }}
+        shell: pwsh
         run: |
-          set -euxo pipefail
-          adt -package \
-            -target apk-captive-runtime \
-            -arch armv8 \
-            -storetype pkcs12 \
-            -keystore build/cert.p12 \
-            -storepass narutoair \
-            build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk \
-            NarutoAir-app.xml \
-            -platformsdk "$ANDROID_HOME" \
-            -C build NarutoAir.swf \
-            -extdir build/ext
-          ls -lh build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk
-          unzip -t build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk
-          unzip -l build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk | grep 'lib/arm64-v8a' | head -20
+          $ErrorActionPreference = 'Stop'
+          adt -package -target apk-captive-runtime -arch armv8 `
+            -storetype pkcs12 -keystore build\cert.p12 -storepass narutoair `
+            build\NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk `
+            NarutoAir-app.xml `
+            -platformsdk $env:ANDROID_HOME `
+            -C build NarutoAir.swf `
+            -extdir build\ext
+          if ($LASTEXITCODE -ne 0) { throw "APK packaging failed" }
+
+          $apk = 'build\NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk'
+          if (!(Test-Path $apk)) { throw "APK missing" }
+          Get-Item $apk | Format-List Name,Length,FullName
+          $entries = jar tf $apk
+          $arm64 = $entries | Select-String 'lib/arm64-v8a/'
+          if (!$arm64) { throw "APK does not contain arm64-v8a libraries" }
+          $arm64 | Select-Object -First 20
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
