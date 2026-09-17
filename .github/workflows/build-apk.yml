@@ -35,9 +35,9 @@ jobs:
           $androidJar = Join-Path $env:ANDROID_HOME 'platforms\\android-35\\android.jar'
           if (!(Test-Path $androidJar)) { throw "android-35/android.jar not found" }
 
-      - name: Patch 0.5.7 DOM bridge SWF capture
+      - name: Patch 0.5.8 legacy TLS HTTP bridge
         shell: pwsh
-        run: .\\scripts\\patch-057.ps1
+        run: .\\scripts\\patch-058.ps1
 
       - name: Build ANE
         shell: pwsh
@@ -77,17 +77,17 @@ jobs:
         run: |
           adt -package -target apk-captive-runtime -arch armv8 `
             -storetype pkcs12 -keystore build\\cert.p12 -storepass narutoair `
-            build\\NarutoOnline_AIR_ARM64_0.5.7_DOM_BRIDGE_SWF_CAPTURE.apk `
+            build\\NarutoOnline_AIR_ARM64_0.5.8_LEGACY_TLS_HTTP_BRIDGE.apk `
             NarutoAir-app.xml `
             -C build NarutoAir.swf `
             -extdir build\\ext
           if ($LASTEXITCODE -ne 0) { throw "APK packaging failed" }
-          $entries = jar tf build\\NarutoOnline_AIR_ARM64_0.5.7_DOM_BRIDGE_SWF_CAPTURE.apk
+          $entries = jar tf build\\NarutoOnline_AIR_ARM64_0.5.8_LEGACY_TLS_HTTP_BRIDGE.apk
           if (!($entries | Select-String 'lib/arm64-v8a/')) { throw "APK missing ARM64" }
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NarutoOnline_AIR_ARM64_0.5.7_DOM_BRIDGE_SWF_CAPTURE
-          path: build/NarutoOnline_AIR_ARM64_0.5.7_DOM_BRIDGE_SWF_CAPTURE.apk
+          name: NarutoOnline_AIR_ARM64_0.5.8_LEGACY_TLS_HTTP_BRIDGE
+          path: build/NarutoOnline_AIR_ARM64_0.5.8_LEGACY_TLS_HTTP_BRIDGE.apk
           if-no-files-found: error
