@@ -20,8 +20,6 @@ package {
     import flash.utils.getDefinitionByName;
 
     public class NarutoAir extends Sprite {
-        private static const UA:String = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/99 Safari/537.36 NarutoAIR/0.4.8";
-
         private var bridge:*;
         private var loader:Loader;
         private var logField:TextField;
@@ -45,7 +43,7 @@ package {
             graphics.drawRect(0, 0, stage.stageWidth, stage.stageHeight);
             graphics.endFill();
             createLog();
-            log("Naruto AIR 0.4.8 - ApplicationDomain + sessao nativa...");
+            log("Naruto AIR 0.4.9 - portal clean + AIR loader...");
 
             try {
                 var WrapperClass:Class = getDefinitionByName("br.davi.narutoair.portal.PortalMarker") as Class;
@@ -135,7 +133,7 @@ package {
                         info.flashvars || {},
                         String(info.cookie || ""),
                         String(info.page || ""),
-                        String(info.userAgent || UA)
+                        String(info.userAgent || "")
                     );
                 } catch (err:Error) {
                     launched = false;
@@ -161,7 +159,7 @@ package {
                 req.followRedirects = true;
                 req.manageCookies = false;
                 req.idleTimeout = 30000;
-                req.userAgent = userAgent ? userAgent : UA;
+                if (userAgent && userAgent.length > 0) req.userAgent = userAgent;
 
                 var headers:Array = [];
                 if (cookie) headers.push(new URLRequestHeader("Cookie", cookie));
@@ -170,12 +168,12 @@ package {
                 headers.push(new URLRequestHeader("Accept", "application/x-shockwave-flash,*/*;q=0.8"));
                 req.requestHeaders = headers;
 
-                // AIR exige que SWFs com ActionScript sejam carregados no mesmo ApplicationDomain.
                 var ctx:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain, null);
                 ctx.parameters = stringParams;
 
                 report("Solicitando SWF com sessao do portal...");
                 log("Cookie nativo: " + (cookie ? "SIM (" + cookie.length + " chars)" : "NAO"));
+                log("User-Agent WebView: " + (userAgent ? "NATIVO" : "padrao AIR"));
                 swfStarted = false;
                 lastProgress = -1;
                 loader.load(req, ctx);
@@ -203,7 +201,7 @@ package {
             if (e.bytesTotal <= 0) return;
             var pct:int = int((e.bytesLoaded * 100) / e.bytesTotal);
             var bucket:int = int(pct / 10) * 10;
-            if (bucket != lastProgress && (bucket == 10 || bucket == 25 || bucket == 50 || bucket == 75 || bucket >= 90)) {
+            if (bucket != lastProgress && (bucket == 10 || bucket == 20 || bucket == 30 || bucket == 40 || bucket == 50 || bucket == 60 || bucket == 70 || bucket == 80 || bucket >= 90)) {
                 lastProgress = bucket;
                 report("SWF download: " + pct + "%");
             }
