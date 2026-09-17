@@ -17,8 +17,8 @@ import android.webkit.WebViewClient;
 import com.adobe.fre.FREContext;
 import com.adobe.fre.FREFunction;
 import com.adobe.fre.FREObject;
-import com.adobe.fre.FREWrongThreadException;
 
+import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.util.HashMap;
@@ -114,8 +114,11 @@ public class PortalContext extends FREContext {
                 try {
                     Object parsed = new JSONTokener(value).nextValue();
                     String json = parsed instanceof String ? (String) parsed : value;
-                    if (json.contains("\\\"swf\\\":\\\"") && json.toLowerCase().contains(".swf")) {
+                    JSONObject payload = new JSONObject(json);
+                    String swf = payload.optString("swf", "");
+                    if (!swf.isEmpty() && swf.toLowerCase().contains(".swf")) {
                         launchSent = true;
+                        send("log", "SWF e parametros de lancamento capturados.");
                         send("launch", json);
                     }
                 } catch (Throwable t) {
