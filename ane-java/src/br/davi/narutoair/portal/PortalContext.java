@@ -32,14 +32,11 @@ public class PortalContext extends FREContext {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean launchSent = false;
     private boolean flashRepairAttempted = false;
+    private boolean desktopGameUaActive = false;
     private volatile String state = "native-context-ready";
-    private volatile String portalUserAgent = "";
+    private volatile String nativeUserAgent = "";
+    private volatile String activeUserAgent = "";
 
-    /*
-     * Importante: não falsificamos navigator.userAgent nem o UA HTTP.
-     * O portal continua vendo o WebView Android real. Só simulamos a API
-     * do Flash/swfobject quando chegamos à página de jogo.
-     */
     private static final String FLASH_ADAPTER_JS =
             "(function(){try{" +
             "if(window.__narutoAirAdapterInstalled){try{window.__narutoAirPatch&&window.__narutoAirPatch();}catch(e){}return 'already';}" +
@@ -53,14 +50,14 @@ public class PortalContext extends FREContext {
             "window.__narutoAirPatch=function(){try{" +
             "var s=window.swfobject;if(!s)return false;" +
             "s.hasFlashPlayerVersion=function(){return true;};s.getFlashPlayerVersion=function(){return{major:32,minor:0,release:0};};" +
-            "s.ua=s.ua||{};s.ua.pv=[32,0,0];" +
+            "s.ua=s.ua||{};s.ua.w3=true;s.ua.win=true;s.ua.mac=false;s.ua.pv=[32,0,0];" +
             "if(!s.__narutoAirPatched){s.__narutoAirPatched=true;s.__narutoAirOriginalEmbed=s.embedSWF;" +
             "s.embedSWF=function(swfUrl,replaceElemId,width,height,version,expressInstallUrl,flashvars,params,attrs,callbackFn){" +
             "try{var abs=(new URL(String(swfUrl),location.href)).href;window.__narutoAirLaunch={swf:abs,flashvars:flashvars||{},params:params||{},page:location.href};" +
             "var el=document.getElementById(replaceElemId);if(el){el.setAttribute('data-narutoair-swf',abs);el.setAttribute('data-narutoair-flashvars',JSON.stringify(flashvars||{}));}" +
             "if(typeof callbackFn==='function'){try{callbackFn({success:true,id:replaceElemId,ref:el||null});}catch(cb){}}return true;}catch(z){return false;}};}return true;}catch(e){return false;}};" +
             "window.__narutoAirAdapterInstalled=true;window.__narutoAirPatch();" +
-            "window.setInterval(function(){try{window.__narutoAirPatch();}catch(e){}},100);" +
+            "window.setInterval(function(){try{window.__narutoAirPatch();}catch(e){}},75);" +
             "return 'installed';}catch(e){return 'ERR:'+String(e);}})();";
 
     @Override public Map<String, FREFunction> getFunctions() {
@@ -97,6 +94,57 @@ public class PortalContext extends FREContext {
         return u.contains("/serverlist") || u.contains("login") || u.contains("passport") || u.contains("oauth") || u.contains("account");
     }
 
+    private boolean isAllowedGameHost(String url) {
+        String u = url == null ? "" : url.toLowerCase();
+        return u.contains("narutowebgame.com") || u.contains("oasgames.com");
+    }
+
+    private boolean isLikelyGameUrl(String url) {
+        String u = url == null ? "" : url.toLowerCase();
+        if (!isAllowedGameHost(u)) return false;
+        if (u.contains("login") || u.contains("passport") || u.contains("oauth") || u.contains("account")) return false;
+        return u.contains("/game") || u.contains("/play") || u.contains("game?") || u.contains("serverid=") || u.contains("server_id=") || u.contains("sid=") || (u.contains("server=") && !u.contains("/serverlist"));
+    }
+
+    private String buildDesktopGameUa(String sourceUa) {
+        String chrome = "Chrome/140.0.0.0";
+        try {
+            if (sourceUa != null) {
+                int p = sourceUa.indexOf("Chrome/");
+                if (p >= 0) {
+                    int end = sourceUa.indexOf(' ', p);
+                    chrome = end > p ? sourceUa.substring(p, end) : sourceUa.substring(p);
+                }
+            }
+        } catch (Throwable ignored) { }
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " + chrome + " Safari/537.36";
+    }
+
+    private void activateDesktopGameUa(final WebView view, String reason) {
+        if (view == null) return;
+        try {
+            String desktopUa = buildDesktopGameUa(nativeUserAgent);
+            view.getSettings().setUserAgentString(desktopUa);
+            activeUserAgent = desktopUa;
+            desktopGameUaActive = true;
+            setState("desktop-game-UA active: " + reason);
+        } catch (Throwable t) {
+            setState("ERROR desktop-game-UA " + t.getMessage());
+        }
+    }
+
+    private void restoreNativeUa(final WebView view, String reason) {
+        if (view == null || nativeUserAgent == null || nativeUserAgent.isEmpty()) return;
+        try {
+            view.getSettings().setUserAgentString(nativeUserAgent);
+            activeUserAgent = nativeUserAgent;
+            desktopGameUaActive = false;
+            setState("native-UA restored: " + reason);
+        } catch (Throwable t) {
+            setState("ERROR native-UA restore " + t.getMessage());
+        }
+    }
+
     private void injectFlashAdapter(final WebView view, final String reason) {
         if (view == null) return;
         try {
@@ -110,8 +158,27 @@ public class PortalContext extends FREContext {
 
     private void injectBurst(final WebView view) {
         injectFlashAdapter(view, "start");
-        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "100ms"); }, 100);
+        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "30ms"); }, 30);
+        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "120ms"); }, 120);
         handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "350ms"); }, 350);
+    }
+
+    private boolean handleNavigation(final WebView view, String target) {
+        if (view == null || target == null || target.isEmpty()) return false;
+
+        if (!desktopGameUaActive && isLikelyGameUrl(target)) {
+            activateDesktopGameUa(view, "game-navigation");
+            injectBurst(view);
+            view.loadUrl(target);
+            return true;
+        }
+
+        if (desktopGameUaActive && isPortalOrLoginPage(target) && !isLikelyGameUrl(target)) {
+            restoreNativeUa(view, "portal-navigation");
+            view.loadUrl(target);
+            return true;
+        }
+        return false;
     }
 
     private void createAndOpen(final String url) {
@@ -124,6 +191,7 @@ public class PortalContext extends FREContext {
                 removeWebViewNow();
                 launchSent = false;
                 flashRepairAttempted = false;
+                desktopGameUaActive = false;
                 setState("ui-thread creating-webview");
 
                 webView = new WebView(activity);
@@ -150,7 +218,8 @@ public class PortalContext extends FREContext {
                 s.setJavaScriptCanOpenWindowsAutomatically(true);
                 s.setSupportMultipleWindows(false);
                 s.setCacheMode(WebSettings.LOAD_DEFAULT);
-                portalUserAgent = s.getUserAgentString();
+                nativeUserAgent = s.getUserAgentString();
+                activeUserAgent = nativeUserAgent;
                 setState("native-webview-ua-ready");
 
                 CookieManager cm = CookieManager.getInstance();
@@ -159,24 +228,35 @@ public class PortalContext extends FREContext {
 
                 webView.setWebChromeClient(new WebChromeClient());
                 webView.setWebViewClient(new WebViewClient() {
+                    @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                        try { return handleNavigation(view, request.getUrl().toString()); }
+                        catch (Throwable t) { setState("navigation-error " + t.getMessage()); return false; }
+                    }
+
+                    @Override public boolean shouldOverrideUrlLoading(WebView view, String target) {
+                        try { return handleNavigation(view, target); }
+                        catch (Throwable t) { setState("navigation-error " + t.getMessage()); return false; }
+                    }
+
                     @Override public void onPageStarted(WebView view, String pageUrl, Bitmap favicon) {
                         super.onPageStarted(view, pageUrl, favicon);
                         setState("page-started " + pageUrl);
-                        if (!isPortalOrLoginPage(pageUrl)) injectBurst(view);
+                        if (desktopGameUaActive || !isPortalOrLoginPage(pageUrl)) injectBurst(view);
                     }
 
                     @Override public void onPageFinished(WebView view, String pageUrl) {
                         super.onPageFinished(view, pageUrl);
                         setState("page-finished " + pageUrl);
                         detectCloudflareBlock(view);
-                        if (!isPortalOrLoginPage(pageUrl)) {
+                        if (desktopGameUaActive || !isPortalOrLoginPage(pageUrl)) {
                             injectFlashAdapter(view, "finished");
-                            inspectSoon(view, 100);
-                            inspectSoon(view, 600);
+                            inspectSoon(view, 80);
+                            inspectSoon(view, 350);
+                            inspectSoon(view, 900);
                             inspectSoon(view, 1800);
                             inspectSoon(view, 3500);
-                            detectFlashWarningAndRepair(view);
                         }
+                        detectFlashWarningAndRepair(view);
                     }
 
                     @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -212,7 +292,7 @@ public class PortalContext extends FREContext {
             if (view != webView) return;
             view.evaluateJavascript(js, value -> {
                 if (value != null && value.toLowerCase().contains("yes")) {
-                    setState("CLOUDFLARE BLOCK: portal recusou esta sessao; UA nativo ativo");
+                    setState("CLOUDFLARE BLOCK: current-UA=" + (desktopGameUaActive ? "desktop-game" : "native"));
                 }
             });
         }, 200);
@@ -220,19 +300,21 @@ public class PortalContext extends FREContext {
 
     private void detectFlashWarningAndRepair(final WebView view) {
         if (flashRepairAttempted || launchSent) return;
-        final String js = "(function(){try{var t=((document.body&&document.body.innerText)||'').toLowerCase();return (t.indexOf('flash player')>=0||t.indexOf('adobe flash')>=0||t.indexOf('instale o flash')>=0||t.indexOf('flash não')>=0||t.indexOf('flash nao')>=0)?'yes':'no';}catch(e){return 'no';}})();";
+        final String js = "(function(){try{var t=((document.body&&document.body.innerText)||'').toLowerCase();return (t.indexOf('flash player')>=0||t.indexOf('adobe flash')>=0||t.indexOf('instale o flash')>=0||t.indexOf('flash não')>=0||t.indexOf('flash nao')>=0||t.indexOf('browser não suporta mais o flash')>=0||t.indexOf('browser nao suporta mais o flash')>=0)?'yes':'no';}catch(e){return 'no';}})();";
         handler.postDelayed(() -> {
             if (view != webView || launchSent || flashRepairAttempted) return;
             view.evaluateJavascript(js, value -> {
                 if (value != null && value.toLowerCase().contains("yes")) {
                     flashRepairAttempted = true;
-                    setState("flash-warning detected; adapter reinjected without reload");
+                    activateDesktopGameUa(view, "server-side-flash-fallback");
+                    setState("flash-warning: switching to desktop UA and reloading once");
                     injectBurst(view);
-                    inspectSoon(view, 150);
-                    inspectSoon(view, 900);
+                    handler.postDelayed(() -> {
+                        if (view == webView && !launchSent) view.reload();
+                    }, 180);
                 }
             });
-        }, 350);
+        }, 250);
     }
 
     private void inspectSoon(final WebView view, long delayMs) {
@@ -263,7 +345,7 @@ public class PortalContext extends FREContext {
                             try { nativeCookie = CookieManager.getInstance().getCookie(page); } catch (Throwable ignored) { }
                         }
                         if (nativeCookie != null && !nativeCookie.isEmpty()) payload.put("cookie", nativeCookie);
-                        payload.put("userAgent", portalUserAgent == null ? "" : portalUserAgent);
+                        payload.put("userAgent", activeUserAgent == null ? "" : activeUserAgent);
                         launchSent = true;
                         setState("launch-captured " + swf);
                         send("launch", payload.toString());
