@@ -35,7 +35,7 @@ package {
             graphics.drawRect(0, 0, stage.stageWidth, stage.stageHeight);
             graphics.endFill();
             createLog();
-            log("Naruto AIR 0.4.5 - carregando wrapper da ANE...");
+            log("Naruto AIR 0.4.6 - Flash adapter + ANE wrapper...");
 
             try {
                 var WrapperClass:Class = getDefinitionByName("br.davi.narutoair.portal.PortalMarker") as Class;
