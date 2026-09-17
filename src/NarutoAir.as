@@ -43,7 +43,7 @@ package {
             graphics.drawRect(0, 0, stage.stageWidth, stage.stageHeight);
             graphics.endFill();
             createLog();
-            log("Naruto AIR 0.4.9 - portal clean + AIR loader...");
+            log("Naruto AIR 0.5.1 - hybrid UA + AIR loader...");
 
             try {
                 var WrapperClass:Class = getDefinitionByName("br.davi.narutoair.portal.PortalMarker") as Class;
@@ -173,7 +173,7 @@ package {
 
                 report("Solicitando SWF com sessao do portal...");
                 log("Cookie nativo: " + (cookie ? "SIM (" + cookie.length + " chars)" : "NAO"));
-                log("User-Agent WebView: " + (userAgent ? "NATIVO" : "padrao AIR"));
+                log("User-Agent recebido do WebView: " + (userAgent ? "SIM" : "NAO"));
                 swfStarted = false;
                 lastProgress = -1;
                 loader.load(req, ctx);
