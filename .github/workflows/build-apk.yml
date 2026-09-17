@@ -28,21 +28,18 @@ jobs:
           air-version: '51.3.4.3'
           accept-license: true
 
-      - name: Ensure Android platform and packaging tools
+      - name: Use Android SDK packaging tools
         shell: bash
         run: |
           set -euxo pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0' || true
           test -f "$ANDROID_HOME/platforms/android-35/android.jar"
-          test -x "$ANDROID_HOME/build-tools/35.0.0/aapt"
-          test -x "$ANDROID_HOME/build-tools/35.0.0/aapt2"
-
-          # AIR 51.3.4.3's bundled Linux aapt is incompatible with current runners.
-          # Use the official Android SDK tools instead.
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          echo "Using Android build-tools: $BT"
+          test -x "$BT/aapt"
+          test -x "$BT/aapt2"
           rm -f "$AIR_HOME/lib/android/bin/aapt" "$AIR_HOME/lib/android/bin/aapt2"
-          ln -s "$ANDROID_HOME/build-tools/35.0.0/aapt" "$AIR_HOME/lib/android/bin/aapt"
-          ln -s "$ANDROID_HOME/build-tools/35.0.0/aapt2" "$AIR_HOME/lib/android/bin/aapt2"
+          ln -s "$BT/aapt" "$AIR_HOME/lib/android/bin/aapt"
+          ln -s "$BT/aapt2" "$AIR_HOME/lib/android/bin/aapt2"
           "$AIR_HOME/lib/android/bin/aapt" version
           "$AIR_HOME/lib/android/bin/aapt2" version
 
