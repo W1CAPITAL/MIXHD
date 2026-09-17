@@ -6,13 +6,16 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 
 import com.adobe.fre.FREContext;
 import com.adobe.fre.FREFunction;
@@ -49,52 +52,92 @@ public class PortalContext extends FREContext {
 
     private void createAndOpen(final String url) {
         final Activity activity = getActivity();
-        if (activity == null) { send("log", "Activity Android indisponivel."); return; }
+        if (activity == null) {
+            send("log", "ERRO: Activity Android indisponivel.");
+            return;
+        }
+
         activity.runOnUiThread(() -> {
-            destroyWebView();
-            launchSent = false;
-            webView = new WebView(activity);
-            webView.setBackgroundColor(Color.BLACK);
-            WebSettings s = webView.getSettings();
-            s.setJavaScriptEnabled(true);
-            s.setDomStorageEnabled(true);
-            s.setDatabaseEnabled(true);
-            s.setAllowContentAccess(true);
-            s.setAllowFileAccess(true);
-            s.setMediaPlaybackRequiresUserGesture(false);
-            s.setLoadWithOverviewMode(true);
-            s.setUseWideViewPort(true);
-            s.setBuiltInZoomControls(false);
-            s.setDisplayZoomControls(false);
-            s.setUserAgentString(s.getUserAgentString() + " NarutoAIR/0.4");
+            try {
+                removeWebViewNow();
+                launchSent = false;
 
-            CookieManager cm = CookieManager.getInstance();
-            cm.setAcceptCookie(true);
-            cm.setAcceptThirdPartyCookies(webView, true);
+                webView = new WebView(activity);
+                webView.setBackgroundColor(Color.WHITE);
+                webView.setVisibility(View.VISIBLE);
+                webView.setFocusable(true);
+                webView.setFocusableInTouchMode(true);
+                webView.setClickable(true);
+                webView.requestFocus(View.FOCUS_DOWN);
+                if (android.os.Build.VERSION.SDK_INT >= 21) webView.setElevation(1000f);
 
-            webView.setWebChromeClient(new WebChromeClient());
-            webView.setWebViewClient(new WebViewClient() {
-                @Override public void onPageFinished(WebView view, String pageUrl) {
-                    super.onPageFinished(view, pageUrl);
-                    send("log", "Pagina carregada: " + pageUrl);
-                    inspectSoon(view, 250);
-                    inspectSoon(view, 1200);
-                    inspectSoon(view, 3000);
-                }
+                WebSettings s = webView.getSettings();
+                s.setJavaScriptEnabled(true);
+                s.setDomStorageEnabled(true);
+                s.setDatabaseEnabled(true);
+                s.setAllowContentAccess(true);
+                s.setAllowFileAccess(true);
+                s.setMediaPlaybackRequiresUserGesture(false);
+                s.setLoadWithOverviewMode(true);
+                s.setUseWideViewPort(true);
+                s.setBuiltInZoomControls(false);
+                s.setDisplayZoomControls(false);
+                s.setJavaScriptCanOpenWindowsAutomatically(true);
+                s.setSupportMultipleWindows(false);
+                s.setUserAgentString(s.getUserAgentString() + " NarutoAIR/0.4.3");
 
-                @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                    String u = request.getUrl().toString();
-                    if (!launchSent && u.toLowerCase().contains(".swf")) {
-                        send("log", "Requisicao SWF detectada: " + u);
+                CookieManager cm = CookieManager.getInstance();
+                cm.setAcceptCookie(true);
+                cm.setAcceptThirdPartyCookies(webView, true);
+
+                webView.setWebChromeClient(new WebChromeClient());
+                webView.setWebViewClient(new WebViewClient() {
+                    @Override public void onPageFinished(WebView view, String pageUrl) {
+                        super.onPageFinished(view, pageUrl);
+                        send("log", "Pagina carregada: " + pageUrl);
+                        inspectSoon(view, 250);
+                        inspectSoon(view, 1200);
+                        inspectSoon(view, 3000);
                     }
-                    return super.shouldInterceptRequest(view, request);
-                }
-            });
 
-            ViewGroup root = activity.findViewById(android.R.id.content);
-            root.addView(webView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            webView.bringToFront();
-            webView.loadUrl(url);
+                    @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                        super.onReceivedError(view, request, error);
+                        if (request != null && request.isForMainFrame()) {
+                            send("log", "ERRO WebView: " + error);
+                        }
+                    }
+
+                    @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                        String u = request.getUrl().toString();
+                        if (!launchSent && u.toLowerCase().contains(".swf")) {
+                            send("log", "Requisicao SWF detectada: " + u);
+                        }
+                        return super.shouldInterceptRequest(view, request);
+                    }
+                });
+
+                Window window = activity.getWindow();
+                View decor = window != null ? window.getDecorView() : null;
+                if (!(decor instanceof ViewGroup)) {
+                    throw new IllegalStateException("decorView nao e ViewGroup");
+                }
+
+                ViewGroup root = (ViewGroup) decor;
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                );
+                root.addView(webView, lp);
+                webView.bringToFront();
+                root.invalidate();
+                webView.invalidate();
+
+                send("log", "WebView anexada ao decorView: " + root.getClass().getName());
+                send("log", "Abrindo portal: " + url);
+                webView.loadUrl(url);
+            } catch (Throwable t) {
+                send("log", "ERRO ao criar WebView: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            }
         });
     }
 
@@ -131,21 +174,32 @@ public class PortalContext extends FREContext {
     private void setVisible(final boolean visible) {
         Activity a = getActivity();
         if (a == null) return;
-        a.runOnUiThread(() -> { if (webView != null) webView.setVisibility(visible ? View.VISIBLE : View.GONE); });
+        a.runOnUiThread(() -> {
+            if (webView != null) {
+                webView.setVisibility(visible ? View.VISIBLE : View.GONE);
+                if (visible) webView.bringToFront();
+            }
+        });
+    }
+
+    private void removeWebViewNow() {
+        if (webView != null) {
+            try {
+                ViewGroup parent = webView.getParent() instanceof ViewGroup ? (ViewGroup) webView.getParent() : null;
+                if (parent != null) parent.removeView(webView);
+                webView.stopLoading();
+                webView.loadUrl("about:blank");
+                webView.removeAllViews();
+                webView.destroy();
+            } catch (Throwable ignored) { }
+            webView = null;
+        }
     }
 
     private void destroyWebView() {
         Activity a = getActivity();
         if (a == null) return;
-        a.runOnUiThread(() -> {
-            if (webView != null) {
-                ViewGroup parent = (ViewGroup) webView.getParent();
-                if (parent != null) parent.removeView(webView);
-                webView.stopLoading();
-                webView.destroy();
-                webView = null;
-            }
-        });
+        a.runOnUiThread(this::removeWebViewNow);
     }
 
     private class OpenFunction implements FREFunction {
@@ -153,6 +207,7 @@ public class PortalContext extends FREContext {
             String url = "https://naruto.narutowebgame.com/pt/serverlist";
             try { if (args != null && args.length > 0 && args[0] != null) url = args[0].getAsString(); }
             catch (Throwable ignored) { }
+            send("log", "Comando open recebido pela extensao nativa.");
             createAndOpen(url);
             return null;
         }
