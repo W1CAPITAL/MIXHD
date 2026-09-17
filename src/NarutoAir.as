@@ -43,7 +43,7 @@ package {
             graphics.drawRect(0, 0, stage.stageWidth, stage.stageHeight);
             graphics.endFill();
             createLog();
-            log("Naruto AIR 0.5.1 - hybrid UA + AIR loader...");
+            log("Naruto AIR 0.5.4 - real SWF hunter + AIR loader...");
 
             try {
                 var WrapperClass:Class = getDefinitionByName("br.davi.narutoair.portal.PortalMarker") as Class;
@@ -110,6 +110,11 @@ package {
             }
         }
 
+        private function isPlaceholderSwf(url:String):Boolean {
+            var u:String = (url || "").toLowerCase();
+            return u.indexOf("/empty.swf") >= 0 || u.indexOf("/blank.swf") >= 0 || u == "empty.swf" || u == "blank.swf";
+        }
+
         private function onNativeStatus(e:StatusEvent):void {
             if (e.code == "log") {
                 log("EVENTO: " + e.level);
@@ -123,11 +128,17 @@ package {
                         report("Captura recebida sem SWF valido.");
                         return;
                     }
+                    if (isPlaceholderSwf(swf)) {
+                        report("PLACEHOLDER SWF rejeitado: " + swf);
+                        launched = false;
+                        return;
+                    }
                     launched = true;
-                    report("SWF capturado; iniciando pelo AIR...");
+                    report("SWF real capturado; iniciando pelo AIR...");
                     log("SWF: " + swf);
                     log("Pagina origem: " + String(info.page || ""));
                     log("FlashVars: " + countKeys(info.flashvars || {}));
+                    if (info.candidates) log("Candidatos SWF observados: " + info.candidates.length);
                     launchSwf(
                         swf,
                         info.flashvars || {},
@@ -171,14 +182,14 @@ package {
                 var ctx:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain, null);
                 ctx.parameters = stringParams;
 
-                report("Solicitando SWF com sessao do portal...");
+                report("Solicitando SWF real com sessao do portal...");
                 log("Cookie nativo: " + (cookie ? "SIM (" + cookie.length + " chars)" : "NAO"));
                 log("User-Agent recebido do WebView: " + (userAgent ? "SIM" : "NAO"));
                 swfStarted = false;
                 lastProgress = -1;
                 loader.load(req, ctx);
 
-                loadTimeout = new Timer(25000, 1);
+                loadTimeout = new Timer(30000, 1);
                 loadTimeout.addEventListener(TimerEvent.TIMER_COMPLETE, onLoadTimeout);
                 loadTimeout.start();
             } catch (err:Error) {
@@ -201,21 +212,21 @@ package {
             if (e.bytesTotal <= 0) return;
             var pct:int = int((e.bytesLoaded * 100) / e.bytesTotal);
             var bucket:int = int(pct / 10) * 10;
-            if (bucket != lastProgress && (bucket == 10 || bucket == 20 || bucket == 30 || bucket == 40 || bucket == 50 || bucket == 60 || bucket == 70 || bucket == 80 || bucket >= 90)) {
+            if (bucket != lastProgress && bucket >= 10) {
                 lastProgress = bucket;
                 report("SWF download: " + pct + "%");
             }
         }
 
         private function onSwfInit(e:Event):void {
-            report("SWF INIT: codigo principal iniciou.");
+            report("SWF INIT: codigo do SWF real iniciou.");
             hidePortal();
             if (loader && !contains(loader)) addChildAt(loader, 0);
         }
 
         private function onLoaded(e:Event):void {
             stopLoadTimeout();
-            report("SWF COMPLETE: jogo principal carregado.");
+            report("SWF COMPLETE: SWF selecionado carregado.");
             hidePortal();
             if (loader && !contains(loader)) addChildAt(loader, 0);
             if (loader) {
@@ -231,7 +242,7 @@ package {
         }
 
         private function onLoadTimeout(e:TimerEvent):void {
-            report("TIMEOUT 25s: OPEN=" + (swfStarted ? "SIM" : "NAO"));
+            report("TIMEOUT 30s: OPEN=" + (swfStarted ? "SIM" : "NAO"));
             launched = false;
             try { if (loader) loader.close(); } catch (closeErr:Error) { }
             showPortal();
