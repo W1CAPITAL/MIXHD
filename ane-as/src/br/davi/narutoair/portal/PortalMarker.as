@@ -4,7 +4,7 @@ package br.davi.narutoair.portal {
     import flash.external.ExtensionContext;
 
     public final class PortalMarker extends EventDispatcher {
-        public static const VERSION:String = "0.5.1";
+        public static const VERSION:String = "0.5.4";
         private var context:ExtensionContext;
 
         public function PortalMarker() {
