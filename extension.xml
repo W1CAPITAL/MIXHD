@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<extension xmlns="http://ns.adobe.com/air/extension/51.1">
+  <id>br.davi.narutoair.portal</id>
+  <versionNumber>0.4.0</versionNumber>
+  <platforms>
+    <platform name="Android-ARM64">
+      <applicationDeployment>
+        <nativeLibrary>portal.jar</nativeLibrary>
+        <initializer>br.davi.narutoair.portal.PortalExtension</initializer>
+      </applicationDeployment>
+    </platform>
+  </platforms>
+</extension>
