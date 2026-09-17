@@ -1,0 +1,99 @@
+name: Build Naruto AIR ARM64 APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup AIR SDK 51.3.4.3
+        uses: joshtynjala/setup-adobe-air-action@v2
+        with:
+          air-version: '51.3.4.3'
+          accept-license: true
+
+      - name: Ensure Android platform
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]; then
+            yes | "$SDKMANAGER" 'platforms;android-35' || true
+          fi
+          test -f "$ANDROID_HOME/platforms/android-35/android.jar"
+
+      - name: Build ANE
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p build/classes build/native build/ext
+          compc -load-config+="$AIR_HOME/frameworks/air-config.xml" \
+            -source-path=ane-as/src \
+            -include-classes=br.davi.narutoair.portal.PortalMarker \
+            -output=build/portal.swc
+
+          FRE_JAR="$AIR_HOME/lib/android/FlashRuntimeExtensions.jar"
+          test -f "$FRE_JAR"
+          javac -source 8 -target 8 \
+            -cp "$FRE_JAR:$ANDROID_HOME/platforms/android-35/android.jar" \
+            -d build/classes \
+            $(find ane-java/src -name '*.java')
+          jar cf build/native/portal.jar -C build/classes .
+
+          adt -package -target ane build/ext/portal.ane extension.xml \
+            -swc build/portal.swc \
+            -platform Android-ARM64 -C build/native portal.jar
+          unzip -l build/ext/portal.ane
+
+      - name: Compile AIR application
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mxmlc -load-config+="$AIR_HOME/frameworks/air-config.xml" \
+            -source-path=src \
+            -output=build/NarutoAir.swf \
+            src/NarutoAir.as
+
+      - name: Create signing certificate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          adt -certificate -cn 'Naruto AIR Experimental' 2048-RSA build/cert.p12 narutoair
+
+      - name: Package captive ARM64 APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          adt -package \
+            -target apk-captive-runtime \
+            -storetype pkcs12 \
+            -keystore build/cert.p12 \
+            -storepass narutoair \
+            build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk \
+            NarutoAir-app.xml \
+            -C build NarutoAir.swf \
+            -extdir build/ext
+          ls -lh build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL
+          path: build/NarutoOnline_AIR_ARM64_0.4.0_EXPERIMENTAL.apk
+          if-no-files-found: error
