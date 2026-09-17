@@ -292,7 +292,7 @@ public class PortalContext extends FREContext {
                             }
                         }
                         return super.shouldInterceptRequest(view, request);
-                    }}
+                    }
                 });
 
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
