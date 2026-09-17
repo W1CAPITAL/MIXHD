@@ -55,10 +55,12 @@ jobs:
             -d build/classes \
             $(find ane-java/src -name '*.java')
           jar cf build/native/portal.jar -C build/classes .
+          unzip -p build/portal.swc library.swf > build/native/library.swf
+          test -s build/native/library.swf
 
           adt -package -target ane build/ext/portal.ane extension.xml \
             -swc build/portal.swc \
-            -platform Android-ARM64 -C build/native portal.jar
+            -platform Android-ARM64 -C build/native portal.jar library.swf
           unzip -l build/ext/portal.ane
 
       - name: Compile AIR application
