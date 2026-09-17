@@ -165,14 +165,12 @@ public class PortalContext extends FREContext {
 
     private boolean handleNavigation(final WebView view, String target) {
         if (view == null || target == null || target.isEmpty()) return false;
-
         if (!desktopGameUaActive && isLikelyGameUrl(target)) {
             activateDesktopGameUa(view, "game-navigation");
             injectBurst(view);
             view.loadUrl(target);
             return true;
         }
-
         if (desktopGameUaActive && isPortalOrLoginPage(target) && !isLikelyGameUrl(target)) {
             restoreNativeUa(view, "portal-navigation");
             view.loadUrl(target);
@@ -184,7 +182,6 @@ public class PortalContext extends FREContext {
     private void createAndOpen(final String url) {
         final Activity activity = getActivity();
         if (activity == null) { setState("ERROR activity-null"); return; }
-
         setState("open-scheduled activity=" + activity.getClass().getName());
         activity.runOnUiThread(() -> {
             try {
@@ -232,18 +229,15 @@ public class PortalContext extends FREContext {
                         try { return handleNavigation(view, request.getUrl().toString()); }
                         catch (Throwable t) { setState("navigation-error " + t.getMessage()); return false; }
                     }
-
                     @Override public boolean shouldOverrideUrlLoading(WebView view, String target) {
                         try { return handleNavigation(view, target); }
                         catch (Throwable t) { setState("navigation-error " + t.getMessage()); return false; }
                     }
-
                     @Override public void onPageStarted(WebView view, String pageUrl, Bitmap favicon) {
                         super.onPageStarted(view, pageUrl, favicon);
                         setState("page-started " + pageUrl);
                         if (desktopGameUaActive || !isPortalOrLoginPage(pageUrl)) injectBurst(view);
                     }
-
                     @Override public void onPageFinished(WebView view, String pageUrl) {
                         super.onPageFinished(view, pageUrl);
                         setState("page-finished " + pageUrl);
@@ -258,12 +252,10 @@ public class PortalContext extends FREContext {
                         }
                         detectFlashWarningAndRepair(view);
                     }
-
                     @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                         super.onReceivedError(view, request, error);
                         if (request != null && request.isForMainFrame()) setState("ERROR webview " + String.valueOf(error));
                     }
-
                     @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                         String u = request.getUrl().toString();
                         if (!launchSent && u.toLowerCase().contains(".swf")) setState("swf-request " + u);
@@ -276,7 +268,6 @@ public class PortalContext extends FREContext {
                 webView.bringToFront();
                 webView.requestLayout();
                 webView.invalidate();
-
                 setState("webview-attached");
                 webView.loadUrl(url);
                 setState("loadUrl-called " + url);
@@ -291,9 +282,7 @@ public class PortalContext extends FREContext {
         handler.postDelayed(() -> {
             if (view != webView) return;
             view.evaluateJavascript(js, value -> {
-                if (value != null && value.toLowerCase().contains("yes")) {
-                    setState("CLOUDFLARE BLOCK: current-UA=" + (desktopGameUaActive ? "desktop-game" : "native"));
-                }
+                if (value != null && value.toLowerCase().contains("yes")) setState("CLOUDFLARE BLOCK: current-UA=" + (desktopGameUaActive ? "desktop-game" : "native"));
             });
         }, 200);
     }
@@ -307,11 +296,10 @@ public class PortalContext extends FREContext {
                 if (value != null && value.toLowerCase().contains("yes")) {
                     flashRepairAttempted = true;
                     activateDesktopGameUa(view, "server-side-flash-fallback");
-                    setState("flash-warning: switching to desktop UA and reloading once");
+                    setState("flash-warning detected; adapter reinjected without reload");
                     injectBurst(view);
-                    handler.postDelayed(() -> {
-                        if (view == webView && !launchSent) view.reload();
-                    }, 180);
+                    inspectSoon(view, 150);
+                    inspectSoon(view, 900);
                 }
             });
         }, 250);
@@ -393,11 +381,7 @@ public class PortalContext extends FREContext {
             return stringObject("native-ok activity=" + (activity == null ? "null" : activity.getClass().getName()));
         }
     }
-
-    private class StatusFunction implements FREFunction {
-        @Override public FREObject call(FREContext c, FREObject[] a) { return stringObject(state); }
-    }
-
+    private class StatusFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { return stringObject(state); } }
     private class OpenFunction implements FREFunction {
         @Override public FREObject call(FREContext context, FREObject[] args) {
             String url = "https://naruto.narutowebgame.com/pt/serverlist/";
@@ -406,24 +390,12 @@ public class PortalContext extends FREContext {
             return stringObject("open-accepted");
         }
     }
-
-    private class HideFunction implements FREFunction {
-        @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(false); return stringObject("hide-accepted"); }
-    }
-
-    private class ShowFunction implements FREFunction {
-        @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(true); return stringObject("show-accepted"); }
-    }
-
-    private class CloseFunction implements FREFunction {
-        @Override public FREObject call(FREContext c, FREObject[] a) { destroyWebView(); return stringObject("close-accepted"); }
-    }
-
+    private class HideFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(false); return stringObject("hide-accepted"); } }
+    private class ShowFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(true); return stringObject("show-accepted"); } }
+    private class CloseFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { destroyWebView(); return stringObject("close-accepted"); } }
     private class ReportFunction implements FREFunction {
         @Override public FREObject call(FREContext c, FREObject[] a) {
-            try {
-                if (a != null && a.length > 0 && a[0] != null) setState("AIR: " + a[0].getAsString());
-            } catch (Throwable ignored) { }
+            try { if (a != null && a.length > 0 && a[0] != null) setState("AIR: " + a[0].getAsString()); } catch (Throwable ignored) { }
             return stringObject("report-accepted");
         }
     }
