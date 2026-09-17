@@ -1,6 +1,7 @@
 package br.davi.narutoair.portal;
 
 import android.app.Activity;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Handler;
 import android.os.Looper;
@@ -24,13 +25,39 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 
 public class PortalContext extends FREContext {
     private WebView webView;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean launchSent = false;
+    private int flashRetryCount = 0;
     private volatile String state = "native-context-ready";
+
+    private static final String FLASH_ADAPTER_JS =
+            "(function(){try{" +
+            "if(window.__narutoAirAdapterInstalled){try{window.__narutoAirPatch&&window.__narutoAirPatch();}catch(e){}return 'already';}" +
+            "var plugin={name:'Shockwave Flash',description:'Shockwave Flash 32.0 r0',filename:'pepflashplayer.dll'};" +
+            "var plugins={0:plugin,length:1,item:function(i){return i===0?plugin:null;},namedItem:function(n){return /shockwave flash/i.test(String(n))?plugin:null;},refresh:function(){}};plugins['Shockwave Flash']=plugin;" +
+            "var mime={type:'application/x-shockwave-flash',suffixes:'swf',description:'Shockwave Flash',enabledPlugin:plugin};" +
+            "var mimes={0:mime,length:1,item:function(i){return i===0?mime:null;},namedItem:function(n){return String(n)==='application/x-shockwave-flash'?mime:null;}};mimes['application/x-shockwave-flash']=mime;" +
+            "try{Object.defineProperty(navigator,'plugins',{get:function(){return plugins;},configurable:true});}catch(e){try{Object.defineProperty(Navigator.prototype,'plugins',{get:function(){return plugins;},configurable:true});}catch(x){}}" +
+            "try{Object.defineProperty(navigator,'mimeTypes',{get:function(){return mimes;},configurable:true});}catch(e){try{Object.defineProperty(Navigator.prototype,'mimeTypes',{get:function(){return mimes;},configurable:true});}catch(x){}}" +
+            "try{Object.defineProperty(navigator,'userAgent',{get:function(){return String(navigator.__naUA||'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/99 Safari/537.36');},configurable:true});}catch(e){}" +
+            "if(!window.ActiveXObject){window.ActiveXObject=function(n){if(/shockwaveflash/i.test(String(n)))return{GetVariable:function(v){return String(v)==='$version'?'WIN 32,0,0,465':'';}};throw new Error('ActiveX unavailable');};}" +
+            "window.__narutoAirPatch=function(){try{" +
+            "var s=window.swfobject;if(!s)return false;" +
+            "s.hasFlashPlayerVersion=function(){return true;};s.getFlashPlayerVersion=function(){return{major:32,minor:0,release:0};};" +
+            "s.ua=s.ua||{};s.ua.w3=true;s.ua.win=true;s.ua.mac=false;s.ua.pv=[32,0,0];" +
+            "if(!s.__narutoAirPatched){s.__narutoAirPatched=true;s.__narutoAirOriginalEmbed=s.embedSWF;" +
+            "s.embedSWF=function(swfUrl,replaceElemId,width,height,version,expressInstallUrl,flashvars,params,attrs,callbackFn){" +
+            "try{var abs=(new URL(String(swfUrl),location.href)).href;window.__narutoAirLaunch={swf:abs,flashvars:flashvars||{},params:params||{},page:location.href};" +
+            "var el=document.getElementById(replaceElemId);if(el){el.setAttribute('data-narutoair-swf',abs);el.setAttribute('data-narutoair-flashvars',JSON.stringify(flashvars||{}));}" +
+            "if(typeof callbackFn==='function'){try{callbackFn({success:true,id:replaceElemId,ref:el||null});}catch(cb){}}return true;}catch(z){return false;}};}return true;}catch(e){return false;}};" +
+            "window.__narutoAirAdapterInstalled=true;window.__narutoAirPatch();" +
+            "window.setInterval(function(){try{window.__narutoAirPatch();}catch(e){}},50);" +
+            "return 'installed';}catch(e){return 'ERR:'+String(e);}})();";
 
     @Override public Map<String, FREFunction> getFunctions() {
         Map<String, FREFunction> map = new HashMap<>();
@@ -43,9 +70,7 @@ public class PortalContext extends FREContext {
         return map;
     }
 
-    @Override public void dispose() {
-        destroyWebView();
-    }
+    @Override public void dispose() { destroyWebView(); }
 
     private void setState(String s) {
         state = s == null ? "" : s;
@@ -62,18 +87,35 @@ public class PortalContext extends FREContext {
         catch (Throwable ignored) { return null; }
     }
 
+    private void injectFlashAdapter(final WebView view, final String reason) {
+        if (view == null) return;
+        try {
+            view.evaluateJavascript(FLASH_ADAPTER_JS, value -> {
+                if (value != null && value.contains("ERR:")) setState("adapter-error " + value);
+            });
+        } catch (Throwable t) {
+            setState("adapter-exception " + reason + " " + t.getMessage());
+        }
+    }
+
+    private void injectBurst(final WebView view) {
+        injectFlashAdapter(view, "start");
+        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "25ms"); }, 25);
+        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "80ms"); }, 80);
+        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "180ms"); }, 180);
+        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "400ms"); }, 400);
+    }
+
     private void createAndOpen(final String url) {
         final Activity activity = getActivity();
-        if (activity == null) {
-            setState("ERROR activity-null");
-            return;
-        }
+        if (activity == null) { setState("ERROR activity-null"); return; }
 
         setState("open-scheduled activity=" + activity.getClass().getName());
         activity.runOnUiThread(() -> {
             try {
                 removeWebViewNow();
                 launchSent = false;
+                flashRetryCount = 0;
                 setState("ui-thread creating-webview");
 
                 webView = new WebView(activity);
@@ -99,7 +141,7 @@ public class PortalContext extends FREContext {
                 s.setDisplayZoomControls(false);
                 s.setJavaScriptCanOpenWindowsAutomatically(true);
                 s.setSupportMultipleWindows(false);
-                s.setUserAgentString(s.getUserAgentString() + " NarutoAIR/0.4.4");
+                s.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.84 Safari/537.36 NarutoAIR/0.4.6");
 
                 CookieManager cm = CookieManager.getInstance();
                 cm.setAcceptCookie(true);
@@ -107,41 +149,42 @@ public class PortalContext extends FREContext {
 
                 webView.setWebChromeClient(new WebChromeClient());
                 webView.setWebViewClient(new WebViewClient() {
+                    @Override public void onPageStarted(WebView view, String pageUrl, Bitmap favicon) {
+                        super.onPageStarted(view, pageUrl, favicon);
+                        setState("page-started " + pageUrl);
+                        injectBurst(view);
+                    }
+
                     @Override public void onPageFinished(WebView view, String pageUrl) {
                         super.onPageFinished(view, pageUrl);
                         setState("page-finished " + pageUrl);
-                        inspectSoon(view, 250);
-                        inspectSoon(view, 1200);
+                        injectFlashAdapter(view, "finished");
+                        inspectSoon(view, 100);
+                        inspectSoon(view, 500);
+                        inspectSoon(view, 1500);
                         inspectSoon(view, 3000);
+                        detectFlashWarningAndRetry(view);
                     }
 
                     @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                         super.onReceivedError(view, request, error);
-                        if (request != null && request.isForMainFrame()) {
-                            setState("ERROR webview " + String.valueOf(error));
-                        }
+                        if (request != null && request.isForMainFrame()) setState("ERROR webview " + String.valueOf(error));
                     }
 
                     @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                         String u = request.getUrl().toString();
-                        if (!launchSent && u.toLowerCase().contains(".swf")) {
-                            setState("swf-request " + u);
-                        }
+                        if (!launchSent && u.toLowerCase().contains(".swf")) setState("swf-request " + u);
                         return super.shouldInterceptRequest(view, request);
                     }
                 });
 
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                );
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
                 activity.addContentView(webView, lp);
                 webView.bringToFront();
                 webView.requestLayout();
                 webView.invalidate();
 
-                setState("webview-attached " + webView.getWidth() + "x" + webView.getHeight());
-                webView.post(() -> setState("webview-laid-out " + webView.getWidth() + "x" + webView.getHeight()));
+                setState("webview-attached");
                 webView.loadUrl(url);
                 setState("loadUrl-called " + url);
             } catch (Throwable t) {
@@ -150,13 +193,31 @@ public class PortalContext extends FREContext {
         });
     }
 
+    private void detectFlashWarningAndRetry(final WebView view) {
+        if (flashRetryCount >= 1 || launchSent) return;
+        final String js = "(function(){try{var t=((document.body&&document.body.innerText)||'').toLowerCase();return (t.indexOf('flash player')>=0||t.indexOf('adobe flash')>=0||t.indexOf('instale o flash')>=0||t.indexOf('flash não')>=0||t.indexOf('flash nao')>=0)?'yes':'no';}catch(e){return 'no';}})();";
+        handler.postDelayed(() -> {
+            if (view != webView || launchSent || flashRetryCount >= 1) return;
+            view.evaluateJavascript(js, value -> {
+                if (value != null && value.toLowerCase().contains("yes")) {
+                    flashRetryCount++;
+                    setState("flash-warning detected; retrying with adapter");
+                    injectFlashAdapter(view, "warning");
+                    handler.postDelayed(() -> { if (view == webView && !launchSent) view.reload(); }, 120);
+                }
+            });
+        }, 250);
+    }
+
     private void inspectSoon(final WebView view, long delayMs) {
         handler.postDelayed(() -> {
             if (view != webView || launchSent) return;
             final String js = "(function(){try{" +
                     "var out={page:location.href,cookie:document.cookie||'',swf:'',flashvars:{}};" +
+                    "function mergeObj(o){if(!o)return;for(var k in o){try{out.flashvars[String(k)]=String(o[k]);}catch(e){}}}" +
                     "function addKV(str){if(!str)return;str=String(str).replace(/^\\?/,'');str.split('&').forEach(function(p){if(!p)return;var i=p.indexOf('=');var k=i>=0?p.slice(0,i):p;var v=i>=0?p.slice(i+1):'';try{k=decodeURIComponent(k.replace(/\\+/g,' '));v=decodeURIComponent(v.replace(/\\+/g,' '));}catch(e){}if(k)out.flashvars[k]=v;});}" +
-                    "var nodes=document.querySelectorAll('embed,object');for(var i=0;i<nodes.length;i++){var n=nodes[i];var src=n.getAttribute('src')||n.getAttribute('data')||'';if(src&&src.toLowerCase().indexOf('.swf')>=0&&!out.swf)out.swf=new URL(src,location.href).href;var fv=n.getAttribute('flashvars');if(fv)addKV(fv);}" +
+                    "if(window.__narutoAirLaunch){try{out.swf=String(window.__narutoAirLaunch.swf||'');mergeObj(window.__narutoAirLaunch.flashvars||{});}catch(e){}}" +
+                    "var nodes=document.querySelectorAll('[data-narutoair-swf],embed,object');for(var i=0;i<nodes.length;i++){var n=nodes[i];var src=n.getAttribute('data-narutoair-swf')||n.getAttribute('src')||n.getAttribute('data')||'';if(src&&src.toLowerCase().indexOf('.swf')>=0&&!out.swf)out.swf=new URL(src,location.href).href;var fv=n.getAttribute('flashvars')||n.getAttribute('data-narutoair-flashvars');if(fv){try{var jo=JSON.parse(fv);mergeObj(jo);}catch(x){addKV(fv);}}}" +
                     "var ps=document.querySelectorAll('param');for(var j=0;j<ps.length;j++){var p=ps[j];var name=(p.getAttribute('name')||'').toLowerCase();var val=p.getAttribute('value')||'';if((name==='movie'||name==='src')&&val.toLowerCase().indexOf('.swf')>=0&&!out.swf)out.swf=new URL(val,location.href).href;if(name==='flashvars')addKV(val);}" +
                     "var html=document.documentElement?document.documentElement.outerHTML:'';if(!out.swf){var m=html.match(/(?:https?:)?\\/\\/[^\\\"'<> ]+\\.swf[^\\\"'<> ]*/i)||html.match(/[^\\\"'<> ]*NarutoServer\\.swf[^\\\"'<> ]*/i);if(m){try{out.swf=new URL(m[0],location.href).href;}catch(e){out.swf=m[0];}}}" +
                     "var q=(out.swf||'').split('?')[1];if(q)addKV(q);" +
@@ -173,9 +234,7 @@ public class PortalContext extends FREContext {
                         setState("launch-captured " + swf);
                         send("launch", json);
                     }
-                } catch (Throwable t) {
-                    setState("ERROR capture " + t.getMessage());
-                }
+                } catch (Throwable t) { setState("ERROR capture " + t.getMessage()); }
             });
         }, delayMs);
     }
@@ -218,23 +277,15 @@ public class PortalContext extends FREContext {
             return stringObject("native-ok activity=" + (activity == null ? "null" : activity.getClass().getName()));
         }
     }
-
-    private class StatusFunction implements FREFunction {
-        @Override public FREObject call(FREContext c, FREObject[] a) {
-            return stringObject(state);
-        }
-    }
-
+    private class StatusFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { return stringObject(state); } }
     private class OpenFunction implements FREFunction {
         @Override public FREObject call(FREContext context, FREObject[] args) {
             String url = "https://naruto.narutowebgame.com/pt/serverlist";
-            try { if (args != null && args.length > 0 && args[0] != null) url = args[0].getAsString(); }
-            catch (Throwable ignored) { }
+            try { if (args != null && args.length > 0 && args[0] != null) url = args[0].getAsString(); } catch (Throwable ignored) { }
             createAndOpen(url);
             return stringObject("open-accepted");
         }
     }
-
     private class HideFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(false); return stringObject("hide-accepted"); } }
     private class ShowFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(true); return stringObject("show-accepted"); } }
     private class CloseFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { destroyWebView(); return stringObject("close-accepted"); } }
