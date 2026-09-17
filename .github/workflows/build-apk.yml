@@ -37,27 +37,52 @@ jobs:
           Write-Host "AIR_HOME=$env:AIR_HOME"
           Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
 
-      - name: Apply single controlled Flash repair reload
+      - name: Patch 0.5.3 server launch preflight
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $p = 'ane-java\src\br\davi\narutoair\portal\PortalContext.java'
-          $s = Get-Content $p -Raw
+
+          $portal = 'ane-java\src\br\davi\narutoair\portal\PortalContext.java'
+          $s = Get-Content $portal -Raw
+
+          $oldRoute = 'return u.contains("/game") || u.contains("/play") || u.contains("game?") || u.contains("serverid=") || u.contains("server_id=") || u.contains("sid=") || (u.contains("server=") && !u.contains("/serverlist"));'
+          $newRoute = 'return u.contains("/serverlist/s") || u.contains("/game") || u.contains("/play") || u.contains("game?") || u.contains("serverid=") || u.contains("server_id=") || u.contains("sid=") || (u.contains("server=") && !u.contains("/serverlist"));'
+          if (!$s.Contains($oldRoute)) { throw 'Server launch route patch did not match source' }
+          $s = $s.Replace($oldRoute, $newRoute)
+
           $pattern = 'setState\("flash-warning detected; adapter reinjected without reload"\);\s*injectBurst\(view\);\s*inspectSoon\(view, 150\);\s*inspectSoon\(view, 900\);'
           $replacement = @'
-          setState("flash-warning detected; controlled reload with native UA");
+          setState("flash-warning detected; desktop-UA reload-once");
           injectBurst(view);
           handler.postDelayed(() -> {
               if (view == webView && !launchSent) {
-                  setState("flash-repair reload-once native-UA");
+                  setState("flash-repair reload-once desktop-UA");
                   view.reload();
               }
           }, 180);
           '@
           $patched = [regex]::Replace($s, $pattern, $replacement, 1)
           if ($patched -eq $s) { throw 'Flash repair patch did not match source' }
-          Set-Content -Path $p -Value $patched -Encoding UTF8
-          Write-Host 'Applied one-time Flash repair reload while preserving native Android UA.'
+          Set-Content -Path $portal -Value $patched -Encoding UTF8
+
+          $xml = 'NarutoAir-app.xml'
+          $x = Get-Content $xml -Raw
+          $x = $x.Replace('<versionNumber>0.5.2</versionNumber>', '<versionNumber>0.5.3</versionNumber>')
+          $x = $x.Replace('<versionLabel>0.5.2 hybrid UA fallback reload</versionLabel>', '<versionLabel>0.5.3 server route preflight</versionLabel>')
+          $x = $x.Replace('<name>Naruto AIR Experimental 0.5.2</name>', '<name>Naruto AIR Experimental 0.5.3</name>')
+          Set-Content -Path $xml -Value $x -Encoding UTF8
+
+          $app = 'src\NarutoAir.as'
+          $a = Get-Content $app -Raw
+          $a = $a.Replace('Naruto AIR 0.5.1 - hybrid UA + AIR loader...', 'Naruto AIR 0.5.3 - server route preflight + AIR loader...')
+          Set-Content -Path $app -Value $a -Encoding UTF8
+
+          $marker = 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as'
+          $m = Get-Content $marker -Raw
+          $m = $m.Replace('public static const VERSION:String = "0.5.1";', 'public static const VERSION:String = "0.5.3";')
+          Set-Content -Path $marker -Value $m -Encoding UTF8
+
+          Write-Host '0.5.3 patch applied: /serverlist/sNNN is now treated as game launch before the HTTP request.'
 
       - name: Build ANE
         shell: pwsh
@@ -103,12 +128,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           adt -package -target apk-captive-runtime -arch armv8 `
             -storetype pkcs12 -keystore build\cert.p12 -storepass narutoair `
-            build\NarutoOnline_AIR_ARM64_0.5.0_NATIVE_UA_FLASH_REPAIR.apk `
+            build\NarutoOnline_AIR_ARM64_0.5.3_SERVER_ROUTE_PREFLIGHT.apk `
             NarutoAir-app.xml `
             -C build NarutoAir.swf `
             -extdir build\ext
           if ($LASTEXITCODE -ne 0) { throw "APK packaging failed" }
-          $apk = 'build\NarutoOnline_AIR_ARM64_0.5.0_NATIVE_UA_FLASH_REPAIR.apk'
+          $apk = 'build\NarutoOnline_AIR_ARM64_0.5.3_SERVER_ROUTE_PREFLIGHT.apk'
           if (!(Test-Path $apk)) { throw "APK missing" }
           Get-Item $apk | Format-List Name,Length,FullName
           $entries = jar tf $apk
@@ -119,6 +144,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NarutoOnline_AIR_ARM64_0.5.0_NATIVE_UA_FLASH_REPAIR
-          path: build/NarutoOnline_AIR_ARM64_0.5.0_NATIVE_UA_FLASH_REPAIR.apk
+          name: NarutoOnline_AIR_ARM64_0.5.3_SERVER_ROUTE_PREFLIGHT
+          path: build/NarutoOnline_AIR_ARM64_0.5.3_SERVER_ROUTE_PREFLIGHT.apk
           if-no-files-found: error
