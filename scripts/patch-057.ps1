@@ -8,8 +8,10 @@ if(!$s.Contains($field)){throw 'desktopGameUaActive field not found'}
 $s=$s.Replace($field,$field+[Environment]::NewLine+'    private boolean bootstrapReplayAttempted = false;')
 
 $reset='launchSent = false;'
-$resetPos=$s.IndexOf($reset)
-if($resetPos -lt 0){throw 'launch reset not found'}
+$createPos=$s.IndexOf('private void createAndOpen')
+if($createPos -lt 0){throw 'createAndOpen not found'}
+$resetPos=$s.IndexOf($reset,$createPos)
+if($resetPos -lt 0){throw 'launch reset in createAndOpen not found'}
 $s=$s.Remove($resetPos,$reset.Length).Insert($resetPos,$reset+[Environment]::NewLine+'                bootstrapReplayAttempted = false;')
 
 $tail='window.__narutoAirAdapterInstalled=true;window.__narutoAirPatch();'
