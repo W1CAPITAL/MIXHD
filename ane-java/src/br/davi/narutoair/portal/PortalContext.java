@@ -25,16 +25,21 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 
 public class PortalContext extends FREContext {
     private WebView webView;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean launchSent = false;
-    private int flashRetryCount = 0;
+    private boolean flashRepairAttempted = false;
     private volatile String state = "native-context-ready";
+    private volatile String portalUserAgent = "";
 
+    /*
+     * Importante: não falsificamos navigator.userAgent nem o UA HTTP.
+     * O portal continua vendo o WebView Android real. Só simulamos a API
+     * do Flash/swfobject quando chegamos à página de jogo.
+     */
     private static final String FLASH_ADAPTER_JS =
             "(function(){try{" +
             "if(window.__narutoAirAdapterInstalled){try{window.__narutoAirPatch&&window.__narutoAirPatch();}catch(e){}return 'already';}" +
@@ -44,19 +49,18 @@ public class PortalContext extends FREContext {
             "var mimes={0:mime,length:1,item:function(i){return i===0?mime:null;},namedItem:function(n){return String(n)==='application/x-shockwave-flash'?mime:null;}};mimes['application/x-shockwave-flash']=mime;" +
             "try{Object.defineProperty(navigator,'plugins',{get:function(){return plugins;},configurable:true});}catch(e){try{Object.defineProperty(Navigator.prototype,'plugins',{get:function(){return plugins;},configurable:true});}catch(x){}}" +
             "try{Object.defineProperty(navigator,'mimeTypes',{get:function(){return mimes;},configurable:true});}catch(e){try{Object.defineProperty(Navigator.prototype,'mimeTypes',{get:function(){return mimes;},configurable:true});}catch(x){}}" +
-            "try{Object.defineProperty(navigator,'userAgent',{get:function(){return String(navigator.__naUA||'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/99 Safari/537.36');},configurable:true});}catch(e){}" +
             "if(!window.ActiveXObject){window.ActiveXObject=function(n){if(/shockwaveflash/i.test(String(n)))return{GetVariable:function(v){return String(v)==='$version'?'WIN 32,0,0,465':'';}};throw new Error('ActiveX unavailable');};}" +
             "window.__narutoAirPatch=function(){try{" +
             "var s=window.swfobject;if(!s)return false;" +
             "s.hasFlashPlayerVersion=function(){return true;};s.getFlashPlayerVersion=function(){return{major:32,minor:0,release:0};};" +
-            "s.ua=s.ua||{};s.ua.w3=true;s.ua.win=true;s.ua.mac=false;s.ua.pv=[32,0,0];" +
+            "s.ua=s.ua||{};s.ua.pv=[32,0,0];" +
             "if(!s.__narutoAirPatched){s.__narutoAirPatched=true;s.__narutoAirOriginalEmbed=s.embedSWF;" +
             "s.embedSWF=function(swfUrl,replaceElemId,width,height,version,expressInstallUrl,flashvars,params,attrs,callbackFn){" +
             "try{var abs=(new URL(String(swfUrl),location.href)).href;window.__narutoAirLaunch={swf:abs,flashvars:flashvars||{},params:params||{},page:location.href};" +
             "var el=document.getElementById(replaceElemId);if(el){el.setAttribute('data-narutoair-swf',abs);el.setAttribute('data-narutoair-flashvars',JSON.stringify(flashvars||{}));}" +
             "if(typeof callbackFn==='function'){try{callbackFn({success:true,id:replaceElemId,ref:el||null});}catch(cb){}}return true;}catch(z){return false;}};}return true;}catch(e){return false;}};" +
             "window.__narutoAirAdapterInstalled=true;window.__narutoAirPatch();" +
-            "window.setInterval(function(){try{window.__narutoAirPatch();}catch(e){}},50);" +
+            "window.setInterval(function(){try{window.__narutoAirPatch();}catch(e){}},100);" +
             "return 'installed';}catch(e){return 'ERR:'+String(e);}})();";
 
     @Override public Map<String, FREFunction> getFunctions() {
@@ -67,6 +71,7 @@ public class PortalContext extends FREContext {
         map.put("hide", new HideFunction());
         map.put("show", new ShowFunction());
         map.put("close", new CloseFunction());
+        map.put("report", new ReportFunction());
         return map;
     }
 
@@ -87,6 +92,11 @@ public class PortalContext extends FREContext {
         catch (Throwable ignored) { return null; }
     }
 
+    private boolean isPortalOrLoginPage(String url) {
+        String u = url == null ? "" : url.toLowerCase();
+        return u.contains("/serverlist") || u.contains("login") || u.contains("passport") || u.contains("oauth") || u.contains("account");
+    }
+
     private void injectFlashAdapter(final WebView view, final String reason) {
         if (view == null) return;
         try {
@@ -100,10 +110,8 @@ public class PortalContext extends FREContext {
 
     private void injectBurst(final WebView view) {
         injectFlashAdapter(view, "start");
-        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "25ms"); }, 25);
-        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "80ms"); }, 80);
-        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "180ms"); }, 180);
-        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "400ms"); }, 400);
+        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "100ms"); }, 100);
+        handler.postDelayed(() -> { if (view == webView) injectFlashAdapter(view, "350ms"); }, 350);
     }
 
     private void createAndOpen(final String url) {
@@ -115,7 +123,7 @@ public class PortalContext extends FREContext {
             try {
                 removeWebViewNow();
                 launchSent = false;
-                flashRetryCount = 0;
+                flashRepairAttempted = false;
                 setState("ui-thread creating-webview");
 
                 webView = new WebView(activity);
@@ -141,7 +149,9 @@ public class PortalContext extends FREContext {
                 s.setDisplayZoomControls(false);
                 s.setJavaScriptCanOpenWindowsAutomatically(true);
                 s.setSupportMultipleWindows(false);
-                s.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.84 Safari/537.36 NarutoAIR/0.4.6");
+                s.setCacheMode(WebSettings.LOAD_DEFAULT);
+                portalUserAgent = s.getUserAgentString();
+                setState("native-webview-ua-ready");
 
                 CookieManager cm = CookieManager.getInstance();
                 cm.setAcceptCookie(true);
@@ -152,18 +162,21 @@ public class PortalContext extends FREContext {
                     @Override public void onPageStarted(WebView view, String pageUrl, Bitmap favicon) {
                         super.onPageStarted(view, pageUrl, favicon);
                         setState("page-started " + pageUrl);
-                        injectBurst(view);
+                        if (!isPortalOrLoginPage(pageUrl)) injectBurst(view);
                     }
 
                     @Override public void onPageFinished(WebView view, String pageUrl) {
                         super.onPageFinished(view, pageUrl);
                         setState("page-finished " + pageUrl);
-                        injectFlashAdapter(view, "finished");
-                        inspectSoon(view, 100);
-                        inspectSoon(view, 500);
-                        inspectSoon(view, 1500);
-                        inspectSoon(view, 3000);
-                        detectFlashWarningAndRetry(view);
+                        detectCloudflareBlock(view);
+                        if (!isPortalOrLoginPage(pageUrl)) {
+                            injectFlashAdapter(view, "finished");
+                            inspectSoon(view, 100);
+                            inspectSoon(view, 600);
+                            inspectSoon(view, 1800);
+                            inspectSoon(view, 3500);
+                            detectFlashWarningAndRepair(view);
+                        }
                     }
 
                     @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -193,20 +206,33 @@ public class PortalContext extends FREContext {
         });
     }
 
-    private void detectFlashWarningAndRetry(final WebView view) {
-        if (flashRetryCount >= 1 || launchSent) return;
-        final String js = "(function(){try{var t=((document.body&&document.body.innerText)||'').toLowerCase();return (t.indexOf('flash player')>=0||t.indexOf('adobe flash')>=0||t.indexOf('instale o flash')>=0||t.indexOf('flash não')>=0||t.indexOf('flash nao')>=0)?'yes':'no';}catch(e){return 'no';}})();";
+    private void detectCloudflareBlock(final WebView view) {
+        final String js = "(function(){try{var t=((document.body&&document.body.innerText)||'').toLowerCase();return (t.indexOf('sorry, you have been blocked')>=0||t.indexOf('unable to access')>=0)?'yes':'no';}catch(e){return 'no';}})();";
         handler.postDelayed(() -> {
-            if (view != webView || launchSent || flashRetryCount >= 1) return;
+            if (view != webView) return;
             view.evaluateJavascript(js, value -> {
                 if (value != null && value.toLowerCase().contains("yes")) {
-                    flashRetryCount++;
-                    setState("flash-warning detected; retrying with adapter");
-                    injectFlashAdapter(view, "warning");
-                    handler.postDelayed(() -> { if (view == webView && !launchSent) view.reload(); }, 120);
+                    setState("CLOUDFLARE BLOCK: portal recusou esta sessao; UA nativo ativo");
                 }
             });
-        }, 250);
+        }, 200);
+    }
+
+    private void detectFlashWarningAndRepair(final WebView view) {
+        if (flashRepairAttempted || launchSent) return;
+        final String js = "(function(){try{var t=((document.body&&document.body.innerText)||'').toLowerCase();return (t.indexOf('flash player')>=0||t.indexOf('adobe flash')>=0||t.indexOf('instale o flash')>=0||t.indexOf('flash não')>=0||t.indexOf('flash nao')>=0)?'yes':'no';}catch(e){return 'no';}})();";
+        handler.postDelayed(() -> {
+            if (view != webView || launchSent || flashRepairAttempted) return;
+            view.evaluateJavascript(js, value -> {
+                if (value != null && value.toLowerCase().contains("yes")) {
+                    flashRepairAttempted = true;
+                    setState("flash-warning detected; adapter reinjected without reload");
+                    injectBurst(view);
+                    inspectSoon(view, 150);
+                    inspectSoon(view, 900);
+                }
+            });
+        }, 350);
     }
 
     private void inspectSoon(final WebView view, long delayMs) {
@@ -230,9 +256,17 @@ public class PortalContext extends FREContext {
                     JSONObject payload = new JSONObject(json);
                     String swf = payload.optString("swf", "");
                     if (!swf.isEmpty() && swf.toLowerCase().contains(".swf")) {
+                        String page = payload.optString("page", "");
+                        String nativeCookie = null;
+                        try { nativeCookie = CookieManager.getInstance().getCookie(swf); } catch (Throwable ignored) { }
+                        if ((nativeCookie == null || nativeCookie.isEmpty()) && !page.isEmpty()) {
+                            try { nativeCookie = CookieManager.getInstance().getCookie(page); } catch (Throwable ignored) { }
+                        }
+                        if (nativeCookie != null && !nativeCookie.isEmpty()) payload.put("cookie", nativeCookie);
+                        payload.put("userAgent", portalUserAgent == null ? "" : portalUserAgent);
                         launchSent = true;
                         setState("launch-captured " + swf);
-                        send("launch", json);
+                        send("launch", payload.toString());
                     }
                 } catch (Throwable t) { setState("ERROR capture " + t.getMessage()); }
             });
@@ -277,16 +311,38 @@ public class PortalContext extends FREContext {
             return stringObject("native-ok activity=" + (activity == null ? "null" : activity.getClass().getName()));
         }
     }
-    private class StatusFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { return stringObject(state); } }
+
+    private class StatusFunction implements FREFunction {
+        @Override public FREObject call(FREContext c, FREObject[] a) { return stringObject(state); }
+    }
+
     private class OpenFunction implements FREFunction {
         @Override public FREObject call(FREContext context, FREObject[] args) {
-            String url = "https://naruto.narutowebgame.com/pt/serverlist";
+            String url = "https://naruto.narutowebgame.com/pt/serverlist/";
             try { if (args != null && args.length > 0 && args[0] != null) url = args[0].getAsString(); } catch (Throwable ignored) { }
             createAndOpen(url);
             return stringObject("open-accepted");
         }
     }
-    private class HideFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(false); return stringObject("hide-accepted"); } }
-    private class ShowFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(true); return stringObject("show-accepted"); } }
-    private class CloseFunction implements FREFunction { @Override public FREObject call(FREContext c, FREObject[] a) { destroyWebView(); return stringObject("close-accepted"); } }
+
+    private class HideFunction implements FREFunction {
+        @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(false); return stringObject("hide-accepted"); }
+    }
+
+    private class ShowFunction implements FREFunction {
+        @Override public FREObject call(FREContext c, FREObject[] a) { setVisible(true); return stringObject("show-accepted"); }
+    }
+
+    private class CloseFunction implements FREFunction {
+        @Override public FREObject call(FREContext c, FREObject[] a) { destroyWebView(); return stringObject("close-accepted"); }
+    }
+
+    private class ReportFunction implements FREFunction {
+        @Override public FREObject call(FREContext c, FREObject[] a) {
+            try {
+                if (a != null && a.length > 0 && a[0] != null) setState("AIR: " + a[0].getAsString());
+            } catch (Throwable ignored) { }
+            return stringObject("report-accepted");
+        }
+    }
 }
