@@ -179,3 +179,5 @@ $m=$m.Replace('public static const VERSION:String = "0.5.8";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.5.9 patch applied: popup game WebView + legacy HTTP bridge + SWF capture.'
+
+. .\scripts\patch-060.ps1
