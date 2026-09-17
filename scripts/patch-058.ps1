@@ -63,6 +63,11 @@ $s=$s.Insert($insertPos,$interceptExtra)
 $helperMarker='    private void detectCloudflareBlock(final WebView view) {'
 if(!$s.Contains($helperMarker)){throw 'helper insertion marker missing'}
 $helpers=@'
+    private String abbreviate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
+    }
+
     private boolean isLegacyGameHttps(String url) {
         String u = url == null ? "" : url.toLowerCase();
         return u.startsWith("https://naruto-pt.oasgames.com/");
