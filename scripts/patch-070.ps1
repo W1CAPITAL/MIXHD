@@ -356,3 +356,5 @@ $m=$m.Replace('public static const VERSION:String = "0.6.2";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.7.0 patch applied: official CefSharp launcher flow, window.external bridge, game.php handoff and native LOG inspector.'
+
+. .\scripts\patch-071.ps1
