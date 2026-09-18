@@ -1,0 +1,270 @@
+name: Trace Naruto Guest Flow
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/trace-guest-flow.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Trace official guest flow
+        shell: bash
+        run: |
+          cat > trace-guest.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'fs';
+
+          const LOGIN = 'https://gamebox3.narutowebgame.com/gamebox/2.4.1/template/login.php?lg=pt&gameid=narutopt&maintype=play&page=login&account=oas&version=3.4.7.0&channel=oas&playertype=logingame';
+          const events = [];
+          const swfs = [];
+          const snapshots = [];
+
+          const push = (type, data='') => {
+            const line = new Date().toISOString() + ' | ' + type + ' | ' + String(data);
+            events.push(line);
+            console.log(line);
+          };
+
+          const browser = await chromium.launch({headless:true, args:[
+            '--ignore-certificate-errors',
+            '--allow-running-insecure-content',
+            '--disable-web-security'
+          ]});
+          const context = await browser.newContext({
+            viewport:{width:1280,height:720},
+            ignoreHTTPSErrors:true,
+            userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36'
+          });
+          const page = await context.newPage();
+
+          page.on('console', m => push('CONSOLE '+m.type(), m.text()));
+          page.on('pageerror', e => push('PAGEERROR', e.message));
+          page.on('request', req => {
+            const u=req.url();
+            if (/naruto|oasgames|\.swf|fcgi-bin|gamebox|passport|odp3/i.test(u)) {
+              push('REQ '+req.method(), u);
+            }
+            if (/\.swf(?:[?#]|$)/i.test(u)) swfs.push({source:'network',url:u});
+          });
+          page.on('response', res => {
+            const u=res.url();
+            if (/\.swf(?:[?#]|$)/i.test(u)) push('SWF RESPONSE '+res.status(), u);
+          });
+          page.on('framenavigated', f => push('FRAME NAV', f.url()));
+
+          await page.exposeFunction('__hostLog', (name, payload) => {
+            push('EXTERNAL '+name, typeof payload === 'string' ? payload : JSON.stringify(payload));
+          });
+          await page.exposeFunction('__hostSwf', (payload) => {
+            swfs.push(payload);
+            push('SWF CAPTURE', JSON.stringify(payload));
+          });
+
+          await page.addInitScript(() => {
+            const b64d = s => {
+              try {
+                const bin=atob(String(s||''));
+                const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+                return new TextDecoder().decode(bytes);
+              } catch(e) { return String(s||''); }
+            };
+            const b64e = s => {
+              try {
+                const bytes=new TextEncoder().encode(String(s||''));
+                let bin=''; bytes.forEach(b=>bin+=String.fromCharCode(b));
+                return btoa(bin);
+              } catch(e) { return btoa(String(s||'')); }
+            };
+            const callCb = (name, payload) => {
+              if (!name || name==='null' || name==='undefined') return;
+              try {
+                const fn=window[name];
+                if (typeof fn==='function') fn(String(payload));
+                else (0,eval)(name+'('+JSON.stringify(String(payload))+')');
+              } catch(e) { window.__hostLog('CALLBACK_ERROR', name+' '+e); }
+            };
+            const cfg = {
+              name:'Naruto Online',
+              ico:'//gamebox3.narutowebgame.com/gamebox/2.4.1/static/games/narutopt/icon.jpg',
+              serverbgpic:'//gamebox3.narutowebgame.com/gamebox/2.4.1/static/games/narutopt/list.jpg',
+              accountbgpic:'//gamebox3.narutowebgame.com/gamebox/2.4.1/static/games/narutopt/smallload.jpg',
+              url:'//odp3.oasgames.com/api/game/serverlist?gamecode=narutopt&uid={uid}',
+              openGamesFlag:1,
+              login_css:'//gamebox3.narutowebgame.com/gamebox/2.4.1/static/css/oas.narutopt.css',
+              login_skin:'2',
+              getNewsUrl:'//odp3.oasgames.com/api/game/gbox-news?gamecode=narutopt'
+            };
+
+            const externalBridge = {
+              WINIE_LoginOK(json) {
+                window.__hostLog('WINIE_LoginOK', json);
+                try {
+                  const d=JSON.parse(json||'{}');
+                  const token=b64d(d.token||'');
+                  const username=b64d(d.username||'');
+                  const resp={code:b64e('1'),token,name:b64e(username)};
+                  callCb(d.callback, JSON.stringify(resp));
+                } catch(e) { window.__hostLog('WINIE_LoginOK_ERROR', String(e)); }
+              },
+              WINIE_InitUserData(json) {
+                window.__hostLog('WINIE_InitUserData', json);
+                try { const d=JSON.parse(json||'{}'); callCb(d.callback,'[]'); } catch(e) {}
+              },
+              WINIE_InitBoxType(json) { window.__hostLog('WINIE_InitBoxType', json); },
+              WINIE_Localstorage(json) {
+                window.__hostLog('WINIE_Localstorage', json);
+                try {
+                  const d=JSON.parse(json||'{}');
+                  if (d.callback && d.callback!=='null') callCb(d.callback, JSON.stringify({data:b64e(JSON.stringify(cfg))}));
+                } catch(e) {}
+              },
+              WINIE_DelMainUser(json) {
+                try { const d=JSON.parse(json||'{}'); callCb(d.callback,'1'); } catch(e) {}
+              },
+              WINIE_ShowMsgBox(json) { window.__hostLog('WINIE_ShowMsgBox', json); },
+              WINIE_LoginFacebook(url) { window.__hostLog('WINIE_LoginFacebook', url); },
+              WINIE_GetXiaoUrl(json) { window.__hostLog('WINIE_GetXiaoUrl', json); },
+              WINIE_SetGameMsg(json) { window.__hostLog('WINIE_SetGameMsg', json); },
+              WINIE_OpenWithSystemBrowser(url) { window.__hostLog('WINIE_OpenWithSystemBrowser', url); }
+            };
+            try { Object.defineProperty(window,'external',{value:externalBridge,configurable:true}); }
+            catch(e) { try { Object.assign(window.external,externalBridge); } catch(x) {} }
+
+            const plugin={name:'Shockwave Flash',description:'Shockwave Flash 32.0 r0',filename:'pepflashplayer.dll'};
+            const plugins={0:plugin,length:1,item:i=>i===0?plugin:null,namedItem:n=>/shockwave flash/i.test(String(n))?plugin:null,refresh(){}};
+            plugins['Shockwave Flash']=plugin;
+            const mime={type:'application/x-shockwave-flash',suffixes:'swf',description:'Shockwave Flash',enabledPlugin:plugin};
+            const mimes={0:mime,length:1,item:i=>i===0?mime:null,namedItem:n=>String(n)==='application/x-shockwave-flash'?mime:null};
+            mimes['application/x-shockwave-flash']=mime;
+            try { Object.defineProperty(Navigator.prototype,'plugins',{get:()=>plugins,configurable:true}); } catch(e) {}
+            try { Object.defineProperty(Navigator.prototype,'mimeTypes',{get:()=>mimes,configurable:true}); } catch(e) {}
+            window.ActiveXObject=function(n){
+              if(/shockwaveflash/i.test(String(n))) return {GetVariable:v=>String(v)==='$version'?'WIN 32,0,0,453':''};
+              throw new Error('ActiveX unavailable');
+            };
+
+            const patchSwf = () => {
+              try {
+                const s=window.swfobject;
+                if(!s || s.__tracePatched) return;
+                s.__tracePatched=true;
+                const orig=s.embedSWF;
+                s.hasFlashPlayerVersion=()=>true;
+                s.getFlashPlayerVersion=()=>({major:32,minor:0,release:0});
+                s.embedSWF=function(url,id,w,h,ver,express,flashvars,params,attrs,cb){
+                  let abs=String(url||'');
+                  try { abs=new URL(abs,location.href).href; } catch(e) {}
+                  const data={source:'embedSWF',url:abs,page:location.href,flashvars:flashvars||{},params:params||{},attrs:attrs||{}};
+                  window.__hostSwf(data);
+                  const ref={PercentLoaded:()=>100,GetVariable:v=>String(v)==='$version'?'WIN 32,0,0,453':'',SetVariable:()=>'',CallFunction:()=>''};
+                  if(typeof cb==='function') { try { cb({success:true,id,ref}); } catch(e) {} }
+                  return true;
+                };
+              } catch(e) {}
+            };
+            let swfVal;
+            try {
+              Object.defineProperty(window,'swfobject',{
+                configurable:true,
+                get(){return swfVal;},
+                set(v){swfVal=v; setTimeout(patchSwf,0);}
+              });
+            } catch(e) {}
+            setInterval(patchSwf,25);
+
+            const scan = () => {
+              try {
+                document.querySelectorAll('object,embed').forEach(el=>{
+                  const u=el.data||el.src||el.getAttribute('movie')||el.querySelector?.('param[name=movie]')?.value||'';
+                  if(u){
+                    let abs=u; try{abs=new URL(u,location.href).href;}catch(e){}
+                    window.__hostSwf({source:'dom',url:abs,page:location.href});
+                  }
+                });
+              } catch(e) {}
+            };
+            setInterval(scan,500);
+          });
+
+          push('START', LOGIN);
+          await page.goto(LOGIN,{waitUntil:'domcontentloaded',timeout:60000});
+          await page.screenshot({path:'01-login.png',fullPage:true}).catch(()=>{});
+          snapshots.push({name:'login',url:page.url(),html:await page.content()});
+
+          // The official page performs quick guest registration automatically when no cached account exists.
+          // Wait for its own login callback and game.php transition.
+          await page.waitForTimeout(12000);
+
+          // If server list is visible, click S876 just as a user would.
+          for (let round=0; round<12; round++) {
+            const url=page.url();
+            push('POLL URL',url);
+            const text=await page.locator('body').innerText().catch(()=> '');
+            if (/S876|876/.test(text)) {
+              const candidates=[
+                page.getByText(/S876[^\n]*/i).first(),
+                page.locator('a').filter({hasText:/S876/i}).first(),
+                page.locator('[data-server*="876"],[serverid="876"],[data-id="876"]').first()
+              ];
+              for (const loc of candidates) {
+                try {
+                  if (await loc.count() && await loc.isVisible()) {
+                    push('CLICK','S876');
+                    await loc.click({timeout:3000});
+                    break;
+                  }
+                } catch(e) {}
+              }
+            }
+            if (/naruto-pt\.oasgames\.com|\/main\.html/i.test(url)) break;
+            await page.waitForTimeout(3000);
+          }
+
+          await page.waitForTimeout(30000);
+          await page.screenshot({path:'02-final.png',fullPage:true}).catch(()=>{});
+          snapshots.push({name:'final',url:page.url(),html:await page.content()});
+
+          const frames=page.frames().map(f=>f.url());
+          push('FRAMES',JSON.stringify(frames));
+
+          fs.writeFileSync('trace.txt',events.join('\n'));
+          fs.writeFileSync('swf-candidates.json',JSON.stringify(swfs,null,2));
+          fs.writeFileSync('snapshots.json',JSON.stringify(snapshots,null,2));
+          fs.writeFileSync('cookies.json',JSON.stringify(await context.cookies(),null,2));
+          await browser.close();
+          EOF
+          node trace-guest.mjs
+
+      - name: Upload guest trace
+        uses: actions/upload-artifact@v4
+        with:
+          name: Naruto_Guest_Full_Flow_Trace
+          path: |
+            trace.txt
+            swf-candidates.json
+            snapshots.json
+            cookies.json
+            01-login.png
+            02-final.png
+          if-no-files-found: error
