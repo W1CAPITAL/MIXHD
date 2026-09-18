@@ -52,3 +52,5 @@ $m=$m.Replace('public static const VERSION:String = "0.7.5";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.7.6 patch applied: real entry.swf DOM capture with params/FlashVars/page/cookies -> AIR.'
+
+. .\scripts\patch-077.ps1
