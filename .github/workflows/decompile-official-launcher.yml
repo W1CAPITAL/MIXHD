@@ -1,0 +1,74 @@
+name: Decompile Official Naruto Launcher
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/decompile-official-launcher.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download and extract official launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://img.narutowebgame.com/gamebox3/v3.4.7.0/Naruto%20Online_pt_v3.4.7.0.zip'
+          Invoke-WebRequest -Uri $url -OutFile launcher.zip -UseBasicParsing
+          Expand-Archive launcher.zip -DestinationPath launcher -Force
+          $installer=Get-ChildItem launcher -Filter *.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Force payload | Out-Null
+          7z x $installer.FullName -opayload -y | Out-Null
+          $app=Get-ChildItem payload -Filter 'Naruto Online.exe' -Recurse | Select-Object -First 1
+          if(!$app){throw 'Naruto Online.exe missing after extraction'}
+          Copy-Item $app.FullName NarutoOnlineLauncher.exe
+
+      - name: Install ILSpy CLI
+        shell: pwsh
+        run: |
+          dotnet tool install --global ilspycmd
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Decompile launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          New-Item -ItemType Directory -Force decompiled | Out-Null
+          ilspycmd -p -o decompiled NarutoOnlineLauncher.exe | Out-File ilspy.log -Width 400
+          Get-ChildItem decompiled -Recurse | Select-Object FullName,Length | Out-File decompiled_files.txt -Width 400
+          $patterns=@('pepflash','ppapi','CefSettings','Cef.Initialize','CefSharp','flash','gamebox3','narutowebgame','serverlist','main.html','CommandLineArgs','Plugin')
+          $hits=@()
+          Get-ChildItem decompiled -Recurse -File | ForEach-Object {
+            $f=$_
+            foreach($p in $patterns){
+              $m=Select-String -LiteralPath $f.FullName -Pattern $p -SimpleMatch -ErrorAction SilentlyContinue
+              if($m){
+                $hits += "=== $($f.FullName) :: $p ==="
+                $hits += ($m | Select-Object -First 100 | ForEach-Object {$_.Line})
+              }
+            }
+          }
+          $hits | Set-Content decompiled_hits.txt -Encoding UTF8
+
+      - name: Upload decompilation
+        uses: actions/upload-artifact@v4
+        with:
+          name: Naruto_Launcher_Decompiled
+          path: |
+            decompiled/
+            decompiled_hits.txt
+            decompiled_files.txt
+            ilspy.log
+          if-no-files-found: warn
