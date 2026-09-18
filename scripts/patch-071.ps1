@@ -305,3 +305,5 @@ $m=$m.Replace('public static const VERSION:String = "0.7.0";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.7.1 patch applied: native credential dialog, correct login Localstorage, manual account cache, early game.php Flash adapter.'
+
+. .\scripts\patch-072.ps1
