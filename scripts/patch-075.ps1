@@ -119,3 +119,5 @@ $m=$m.Replace('public static const VERSION:String = "0.7.4";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.7.5 patch applied: exact official AddAccountsBridge cookie/playUrl flow, no fake login callback, no JS proxy 403.'
+
+. .\scripts\patch-076.ps1
