@@ -193,3 +193,5 @@ $m=$m.Replace('public static const VERSION:String = "0.6.1";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.6.2 patch applied: full-flow inspector, trace buffer, LOG overlay and copy button.'
+
+. .\scripts\patch-070.ps1
