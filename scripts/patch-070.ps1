@@ -358,3 +358,4 @@ Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding U
 Write-Host '0.7.0 patch applied: official CefSharp launcher flow, window.external bridge, game.php handoff and native LOG inspector.'
 
 . .\scripts\patch-071.ps1
+. .\scripts\patch-072.ps1
