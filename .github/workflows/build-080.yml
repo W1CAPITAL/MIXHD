@@ -1,0 +1,81 @@
+name: Build Naruto AIR 0.8.0
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/patch-080.ps1'
+      - '.github/workflows/build-080.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup AIR SDK
+        uses: joshtynjala/setup-adobe-air-action@v2
+        with:
+          air-version: '51.3.4.3'
+          accept-license: true
+
+      - name: Apply full patch chain
+        shell: pwsh
+        run: |
+          .\scripts\patch-058.ps1
+          .\scripts\patch-078.ps1
+          .\scripts\patch-079.ps1
+          .\scripts\patch-080.ps1
+
+      - name: Build ANE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path build\classes,build\native,build\ext | Out-Null
+          compc '-source-path=ane-as/src' '-include-classes=br.davi.narutoair.portal.PortalMarker' '-output=build/portal.swc'
+          if ($LASTEXITCODE -ne 0) { throw "compc failed" }
+          $fre=Join-Path $env:AIR_HOME 'lib\android\FlashRuntimeExtensions.jar'
+          $androidJar=Join-Path $env:ANDROID_HOME 'platforms\android-35\android.jar'
+          $javaFiles=Get-ChildItem -Recurse ane-java\src -Filter *.java | ForEach-Object { $_.FullName }
+          javac -source 8 -target 8 -cp "$fre;$androidJar" -d build\classes $javaFiles
+          if ($LASTEXITCODE -ne 0) { throw "javac failed" }
+          jar cf build\native\portal.jar -C build\classes .
+          Push-Location build\native
+          jar xf ..\portal.swc library.swf
+          Pop-Location
+          adt -package -target ane build\ext\portal.ane extension.xml -swc build\portal.swc -platform Android-ARM -C build\native portal.jar library.swf -platform Android-ARM64 -C build\native portal.jar library.swf
+          if ($LASTEXITCODE -ne 0) { throw "ANE packaging failed" }
+
+      - name: Compile app
+        shell: pwsh
+        run: |
+          mxmlc '-source-path=src' '-output=build/NarutoAir.swf' src/NarutoAir.as
+          if ($LASTEXITCODE -ne 0) { throw "mxmlc failed" }
+          adt -certificate -cn 'Naruto AIR Experimental' 2048-RSA build\cert.p12 narutoair
+          if ($LASTEXITCODE -ne 0) { throw "certificate failed" }
+
+      - name: Package APK
+        shell: pwsh
+        run: |
+          adt -package -target apk-captive-runtime -arch armv8 -storetype pkcs12 -keystore build\cert.p12 -storepass narutoair build\NarutoOnline_AIR_ARM64_0.8.0_FINAL_CDN_SWF_HANDOFF.apk NarutoAir-app.xml -C build NarutoAir.swf -extdir build\ext
+          if ($LASTEXITCODE -ne 0) { throw "APK packaging failed" }
+          $entries=jar tf build\NarutoOnline_AIR_ARM64_0.8.0_FINAL_CDN_SWF_HANDOFF.apk
+          if (!($entries | Select-String 'lib/arm64-v8a/')) { throw "APK missing ARM64" }
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NarutoOnline_AIR_ARM64_0.8.0_FINAL_CDN_SWF_HANDOFF
+          path: build/NarutoOnline_AIR_ARM64_0.8.0_FINAL_CDN_SWF_HANDOFF.apk
+          if-no-files-found: error
