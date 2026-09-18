@@ -107,3 +107,5 @@ $m=$m.Replace('public static const VERSION:String = "0.6.0";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.6.1 patch applied: legacy HTML is proxied and Flash bridge is injected before page scripts.'
+
+. .\scripts\patch-062.ps1
