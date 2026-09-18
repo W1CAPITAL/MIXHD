@@ -4,28 +4,31 @@ $p='ane-java\src\br\davi\narutoair\portal\PortalContext.java'
 $s=Get-Content $p -Raw
 
 # 0.7.5: exact WINIE_LoginOK semantics from official AddAccountsBridge.
-# Remove the fake callback response that causes the page to build /gamebox/3.4.7/template/game.php with a corrupted token.
-$fake=@'
-                    JSONObject answer = new JSONObject();
-                    answer.put("code", b64Encode("1"));
-                    answer.put("token", token);
-                    answer.put("name", b64Encode(username));
-                    executeLauncherCallback(callback, answer.toString());
-                    trace("OFFICIAL login callback returned JWT + encoded username");
+# Replace the entire method so previous patch formatting cannot break this correction.
+$bridgeClass=$s.IndexOf('private class LauncherExternalBridge')
+if($bridgeClass -lt 0){throw 'LauncherExternalBridge missing'}
+$loginStart=$s.IndexOf('        @JavascriptInterface' + [Environment]::NewLine + '        public void WINIE_LoginOK(final String json) {',$bridgeClass)
+if($loginStart -lt 0){throw 'WINIE_LoginOK start missing'}
+$loginNext=$s.IndexOf('        @JavascriptInterface',$loginStart+40)
+if($loginNext -lt 0){throw 'WINIE_LoginOK next method missing'}
+$newLogin=@'
+        @JavascriptInterface
+        public void WINIE_LoginOK(final String json) {
+            handler.post(() -> {
+                try {
+                    JSONObject data = new JSONObject(json == null ? "{}" : json);
+                    String token = b64Decode(data.optString("token", ""));
+                    String username = b64Decode(data.optString("username", ""));
+                    launcherToken = token;
+                    launcherUsername = username;
+                    trace("OFFICIAL LOGIN OK user=" + (username.isEmpty() ? "(empty)" : username.replaceAll("(?<=.).(?=.*@)", "*")) + " token=(redacted)");
 
-                    trace("OFFICIAL cookies preserved from login WebView");
-                    setState("official launcher login accepted; waiting official game.php navigation");
-                    trace("0.7.4 official JS owns game.php navigation; no synthetic URL");
-'@
-if(!$s.Contains($fake.Trim())){throw '0.7.4 fake WINIE_LoginOK callback block missing'}
-$real=@'
-                    // Official AddAccountsBridge.WINIE_LoginOK does NOT execute the page callback.
-                    // It updates the oas_user cookie with LoginUser.token and opens GameConfig.playUrl(loginUser).
+                    // Decompiled official AddAccountsBridge does NOT execute a JavaScript callback here.
+                    // It rewrites the oas_user cookie and opens GameConfig.playUrl(loginUser).
                     try {
                         CookieManager cm = CookieManager.getInstance();
                         cm.setCookie("https://gamebox3.narutowebgame.com", "oas_user=" + token + "; Path=/; SameSite=None; Secure");
                         cm.setCookie("https://naruto.narutowebgame.com", "oas_user=" + token + "; Path=/; SameSite=None; Secure");
-                        cm.setCookie("https://oasgames.com", "oas_user=" + token + "; Path=/; SameSite=None; Secure");
                         if (android.os.Build.VERSION.SDK_INT >= 21) cm.flush();
                         trace("OFFICIAL oas_user cookie replaced from LoginUser.token");
                     } catch (Throwable cookieError) {
@@ -47,8 +50,14 @@ $real=@'
                             }
                         }
                     }, 350);
+                } catch (Throwable t) {
+                    setState("WINIE_LoginOK ERROR " + t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()));
+                }
+            });
+        }
+
 '@
-$s=$s.Replace($fake.Trim(),$real.Trim())
+$s=$s.Remove($loginStart,$loginNext-$loginStart).Insert($loginStart,$newLogin)
 
 # The official launcher uses its existing CEF request context for scripts.
 # Our 0.7.4 HttpURLConnection bootstrap fetch is what produced 403 and "File not found".
