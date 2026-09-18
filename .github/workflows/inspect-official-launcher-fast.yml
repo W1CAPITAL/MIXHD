@@ -1,0 +1,63 @@
+name: Fast Inspect Official Naruto Launcher
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/inspect-official-launcher-fast.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and unpack
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://img.narutowebgame.com/gamebox3/v3.4.7.0/Naruto%20Online_pt_v3.4.7.0.zip'
+          Invoke-WebRequest -Uri $url -OutFile launcher.zip -UseBasicParsing
+          Expand-Archive launcher.zip -DestinationPath launcher -Force
+          $exe=Get-ChildItem launcher -Filter *.exe | Select-Object -First 1
+          if(!$exe){throw 'launcher exe missing'}
+          New-Item -ItemType Directory -Force payload | Out-Null
+          7z l $exe.FullName | Out-File archive_listing.txt -Width 400
+          7z x $exe.FullName -opayload -y | Out-File extract_log.txt -Width 400
+          Get-ChildItem payload -Recurse | Select-Object FullName,Length | Out-File payload_files.txt -Width 400
+          Get-ChildItem payload -Recurse | Where-Object {
+            $_.Name -match 'flash|pepper|pepflash|chrom|cef|plugin|swf|config|game|naruto|manifest'
+          } | Select-Object FullName,Length | Out-File interesting_names.txt -Width 400
+
+      - name: Scan small text/config files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          $patterns='http://','https://','.swf','main.html','naruto-pt.oasgames.com','pepflash','Shockwave Flash','PPAPI','NPAPI','Chromium','CEF'
+          $out=@()
+          Get-ChildItem payload -Recurse -File | Where-Object {
+            $_.Length -lt 10000000 -and $_.Extension -match '\.(txt|ini|cfg|json|xml|html|htm|js|conf|log|dat)$'
+          } | ForEach-Object {
+            $f=$_
+            foreach($p in $patterns){
+              $m=Select-String -LiteralPath $f.FullName -Pattern $p -SimpleMatch -ErrorAction SilentlyContinue
+              if($m){$out += "=== $($f.FullName) ==="; $out += ($m | Select-Object -First 50 | ForEach-Object {$_.Line})}
+            }
+          }
+          $out | Set-Content text_hits.txt -Encoding UTF8
+
+      - name: Upload fast inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: Naruto_Launcher_Fast_Inspection
+          path: |
+            archive_listing.txt
+            extract_log.txt
+            payload_files.txt
+            interesting_names.txt
+            text_hits.txt
+          if-no-files-found: warn
