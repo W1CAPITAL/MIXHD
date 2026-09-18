@@ -170,3 +170,5 @@ $m=$m.Replace('public static const VERSION:String = "0.7.3";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.7.4 patch applied: official script bootstrap is prefixed with Flash environment before Naruto game JS executes.'
+
+. .\scripts\patch-075.ps1
