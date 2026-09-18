@@ -124,3 +124,5 @@ $m=$m.Replace('public static const VERSION:String = "0.7.2";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.7.3 patch applied: direct game.php session, aggressive early adapter, explicit HTTP/SSL/JS/render diagnostics.'
+
+. .\scripts\patch-074.ps1
