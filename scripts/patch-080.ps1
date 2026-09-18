@@ -16,9 +16,10 @@ $old=@'
 '@
 if(!$s.Contains($old.Trim())){throw 'native-html immediate handoff block missing'}
 $new=@'
+            final String deferredSwf = swf;
             handler.post(() -> {
                 if (!launchSent) {
-                    trace("NATIVE HTML candidate deferred; waiting resolved CDN entry.swf " + abbreviate(swf, 180));
+                    trace("NATIVE HTML candidate deferred; waiting resolved CDN entry.swf " + abbreviate(deferredSwf, 180));
                 }
             });
 '@
