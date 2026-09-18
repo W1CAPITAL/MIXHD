@@ -1,0 +1,80 @@
+name: Inspect Official Naruto Launcher
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/inspect-official-launcher.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download official launcher 3.4.7.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://img.narutowebgame.com/gamebox3/v3.4.7.0/Naruto%20Online_pt_v3.4.7.0.zip'
+          Invoke-WebRequest -Uri $url -OutFile launcher.zip -UseBasicParsing
+          Get-Item launcher.zip | Format-List Name,Length
+
+      - name: Extract launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Expand-Archive launcher.zip -DestinationPath launcher -Force
+          Get-ChildItem launcher -Recurse | Select-Object FullName,Length | Out-File launcher_files.txt -Width 300
+
+      - name: Scan configs and binaries
+        shell: python
+        run: |
+          import os,re,json
+          root='launcher'
+          url_re=re.compile(rb'https?://[^\x00\s"\'<>]{4,300}',re.I)
+          swf_re=re.compile(rb'[^\x00\s"\'<>]{0,220}\.swf(?:\?[^\x00\s"\'<>]{0,220})?',re.I)
+          keys=[b'naruto-pt.oasgames.com',b'narutowebgame.com',b'main.html',b'fcgi-bin',b'flash',b'swf',b'pepflash',b'npapi',b'ppapi',b'adobe',b'gamebox']
+          findings=[]
+          for dp,_,fs in os.walk(root):
+              for fn in fs:
+                  path=os.path.join(dp,fn)
+                  try:
+                      data=open(path,'rb').read()
+                  except Exception:
+                      continue
+                  hits=set()
+                  for m in url_re.finditer(data):
+                      hits.add(m.group(0).decode('latin1','ignore'))
+                  for m in swf_re.finditer(data):
+                      s=m.group(0).decode('latin1','ignore')
+                      if '.swf' in s.lower(): hits.add(s[-300:])
+                  low=data.lower()
+                  for k in keys:
+                      if k in low:
+                          hits.add('[contains] '+k.decode())
+                  if hits:
+                      findings.append({'file':path.replace('\\','/'),'size':len(data),'hits':sorted(hits)})
+          with open('launcher_inspection.json','w',encoding='utf-8') as f:
+              json.dump(findings,f,ensure_ascii=False,indent=2)
+          with open('launcher_inspection.txt','w',encoding='utf-8') as f:
+              for item in findings:
+                  f.write('\n=== '+item['file']+' ('+str(item['size'])+' bytes) ===\n')
+                  for h in item['hits']:
+                      f.write(h+'\n')
+          print('files with findings:',len(findings))
+
+      - name: Upload inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: Naruto_Official_Launcher_3.4.7.0_Inspection
+          path: |
+            launcher_files.txt
+            launcher_inspection.txt
+            launcher_inspection.json
+          if-no-files-found: error
