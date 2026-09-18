@@ -81,3 +81,5 @@ $m=$m.Replace('public static const VERSION:String = "0.7.1";','public static con
 Set-Content 'ane-as\src\br\davi\narutoair\portal\PortalMarker.as' $m -Encoding UTF8
 
 Write-Host '0.7.2 patch applied: automatic guest flow, official cookie semantics, early game bootstrap trace.'
+
+. .\scripts\patch-073.ps1
